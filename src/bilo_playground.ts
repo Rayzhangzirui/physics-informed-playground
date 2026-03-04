@@ -52,7 +52,7 @@ function getTPoints(): number[] {
 }
 
 function buildModel() {
-  model = new BILOModel(nHidden, 42);
+  model = new BILOModel(nHidden, 2, 42);
   t_colloc = getTPoints();
   a_learned = aParam;
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
@@ -95,13 +95,25 @@ function oneStep() {
   const { losses, grads } = model.computeLossesAndGradients(t_colloc, a_colloc, opts);
 
   const lrScaled = lr;
-  model.W1t = model.W1t.map((w, i) => w - lrScaled * grads.W1t[i]);
-  model.W1a = model.W1a.map((w, i) => w - lrScaled * grads.W1a[i]);
-  model.b1 = model.b1.map((b, i) => b - lrScaled * grads.b1[i]);
-  model.W2 = model.W2.map((w, i) => w - lrScaled * grads.W2[i]);
-  model.b2 -= lrScaled * grads.b2;
+  for (let k = 0; k < model.depth; k++) {
+    const Wk = model._W[k];
+    const gWk = grads[`W${k + 1}`];
+    if (Array.isArray(Wk[0])) {
+      const W = Wk as number[][];
+      const g = gWk as number[][];
+      for (let i = 0; i < W.length; i++) for (let j = 0; j < W[i].length; j++) W[i][j] -= lrScaled * g[i][j];
+    } else {
+      const W = Wk as number[];
+      const g = gWk as number[];
+      for (let i = 0; i < W.length; i++) W[i] -= lrScaled * g[i];
+    }
+    const bk = model._b[k];
+    const gbk = grads[`b${k + 1}`];
+    if (typeof bk === "number") (model._b[k] as number) = bk - lrScaled * (gbk as number);
+    else for (let i = 0; i < (bk as number[]).length; i++) (bk as number[])[i] -= lrScaled * (gbk as number[])[i];
+  }
 
-  if (mode === "finetune" && grads.a != null) {
+  if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
     a_learned = Math.max(0.1, Math.min(3, a_learned - lrA * grads.a));
   }
 

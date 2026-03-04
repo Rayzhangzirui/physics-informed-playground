@@ -16,6 +16,7 @@
     "build-bilo": "browserify src/bilo_playground.ts -p [tsify] -o dist/bilo.js",
     "watch-bilo": "watchify src/bilo_playground.ts -p [tsify] -v --debug -o dist/bilo.js",
     "test-bilo": "browserify src/bilo_test_runner.ts -p [tsify] -o dist/bilo_test.js && node dist/bilo_test.js",
+    "write-bilo-snapshot": "browserify src/bilo_snapshot_entry.ts -p [tsify] -s biloSnapshot -o dist/bilo_snapshot.js && node scripts/write_bilo_snapshot.js",
     "build": "npm run prep && npm run build-js && npm run build-bilo && npm run build-css && npm run build-html",
     "watch": "npm run prep && concurrently \"npm run watch-js\" \"npm run watch-bilo\" \"npm run watch-css\" \"npm run watch-html\"",
     "serve": "npx serve dist/",

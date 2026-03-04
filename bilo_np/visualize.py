@@ -94,6 +94,51 @@ def plot_solution(
         plt.show()
 
 
+def plot_solution_after_finetune(
+    model: BILOModel,
+    a_learned: float,
+    t_data: np.ndarray,
+    u_data: np.ndarray,
+    t_min: float = 0.0,
+    t_max: float = 1.0,
+    n_pts: int = 201,
+    save_path: str | Path | None = None,
+    show: bool = True,
+) -> None:
+    """Plot solution after fine-tuning: data scatter, BILO u(t,a_learned), and u_a = exp(a_learned*t).
+
+    u_a is the ODE solution u' = a*u with u(0)=1 using the inferred a from BILO.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("matplotlib required for visualization")
+
+    t_plot = np.linspace(t_min, t_max, n_pts)
+    a_plot = np.full_like(t_plot, a_learned)
+    u_bilo = model.eval_u(t_plot, a_plot)
+    u_a = np.exp(a_learned * t_plot)  # ODE solution with inferred a
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.scatter(t_data, u_data, c="k", s=30, alpha=0.8, label="data", zorder=3)
+    ax.plot(t_plot, u_bilo, "-", label="u(t,a;W) (BILO)", linewidth=2)
+    ax.plot(t_plot, u_a, "--", alpha=0.8, label="u_a = exp(a*t)", linewidth=1.5)
+    ax.set_xlabel("t")
+    ax.set_ylabel("u")
+    ax.set_title(f"After fine-tuning: inferred a = {a_learned:.4f}")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(t_min, t_max)
+    plt.tight_layout()
+
+    if save_path:
+        save_path = Path(save_path)
+        plt.savefig(save_path, dpi=120)
+        print(f"Saved to {save_path}")
+    if show:
+        plt.show()
+
+
 def plot_solution_2d(
     model: BILOModel,
     t_min: float = 0.0,

@@ -15,7 +15,7 @@ import numpy as np
 
 from model import BILOModel
 from train import train, train_finetune
-from visualize import plot_loss_history, plot_solution_multi_a, plot_solution_2d
+from visualize import plot_loss_history, plot_solution_multi_a, plot_solution_2d, plot_solution_after_finetune
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w-grad", type=float, default=0.1, help="Weight for L_grad")
     parser.add_argument("--w-data", type=float, default=1.0, help="Weight for L_data (finetune)")
     parser.add_argument("--n-data", type=int, default=21, help="Number of data points for finetune")
+    parser.add_argument("--std", type=float, default=0.0, help="Std of normal noise added to u_data (finetune)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--log-every", type=int, default=200, help="Log every N steps")
     parser.add_argument("--out-dir", type=str, default=None, help="Output directory (default: bilo/output)")
@@ -87,6 +88,8 @@ def main() -> None:
     a_gt = 2.0
     t_data = np.linspace(t_min, t_max, args.n_data)
     u_data = np.exp(a_gt * t_data)  # ground truth u = exp(2*t)
+    if args.std > 0:
+        u_data = u_data + args.std * np.random.randn(args.n_data)
 
     print("\n" + "=" * 60)
     print(f"Stage 2: Fine-tuning (data from a={a_gt}, update W and a)")
@@ -130,6 +133,16 @@ def main() -> None:
                 t_min=0.0,
                 t_max=1.0,
                 save_path=out_dir / "bilo_after_finetune.png",
+                show=False,
+            )
+            plot_solution_after_finetune(
+                model,
+                a_learned=a_learned,
+                t_data=t_data,
+                u_data=u_data,
+                t_min=0.0,
+                t_max=1.0,
+                save_path=out_dir / "bilo_solution_after_finetune.png",
                 show=False,
             )
             plot_solution_2d(

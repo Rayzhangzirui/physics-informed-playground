@@ -298,7 +298,7 @@ export class BILOModel {
     return out;
   }
 
-  private backwardOnePoint(
+  protected backwardOnePoint(
     t: number,
     a: number,
     R: number,
@@ -490,5 +490,114 @@ export class BILOModel {
       W: this._W.map(w => (Array.isArray(w[0]) ? (w as number[][]).map(row => [...row]) : [...(w as number[])])) as (number[][] | number[])[],
       b: this._b.map(b => (typeof b === "number" ? b : [...b])),
     };
+  }
+}
+
+// -----------------------------------------------------------------------------
+// PINN: u(t; W), a is trainable parameter. Same architecture with W1[:,1]=0.
+// -----------------------------------------------------------------------------
+
+export class PINNModel extends BILOModel {
+  constructor(n_hidden: number, depth: number = 2, seed?: number) {
+    super(n_hidden, depth, seed);
+    const W1 = this._W[0] as number[][];
+    for (let i = 0; i < W1.length; i++) W1[i][1] = 0;
+  }
+
+  /**
+   * PINN loss: L_res + L_data only. No L_grad.
+   * dL_res/da = -sum(R*u) over collocation; W1[:,1] grads zeroed.
+   */
+  computeLossesAndGradientsPinn(
+    t_colloc: number[],
+    a_colloc: number[],
+    opts?: { t_data?: number[]; u_data?: number[]; w_res?: number; w_data?: number }
+  ): {
+    losses: { L_res: number; L_grad: number; L_data: number };
+    grads: Record<string, number[] | number[][] | number>;
+  } {
+    const w_res = opts?.w_res ?? 1;
+    const w_data = opts?.w_data ?? 0;
+    const t_data = opts?.t_data;
+    const u_data = opts?.u_data;
+
+    let L_res = 0, L_data = 0;
+    const grad_W_acc: WeightMatrix[] = this._W.map(w =>
+      Array.isArray(w[0])
+        ? (w as number[][]).map(row => row.map(() => 0))
+        : (w as number[]).map(() => 0)
+    ) as WeightMatrix[];
+    const grad_b_acc: (number[] | number)[] = this._b.map(b =>
+      typeof b === "number" ? 0 : (b as number[]).map(() => 0)
+    );
+    let dL_res_da = 0;
+
+    for (let i = 0; i < t_colloc.length; i++) {
+      const t = t_colloc[i], a = a_colloc[i];
+      const f = this.forward(t, a);
+      const R = f.u_t - a * f.u;
+      L_res += 0.5 * R * R;
+      dL_res_da += -R * f.u;
+
+      const { grad_W, grad_b } = this.backwardOnePoint(t, a, R, 0, 0, w_res, 0);
+      for (let k = 0; k < this.depth; k++) {
+        if (Array.isArray(grad_W[k][0])) {
+          addMatInPlace(grad_W_acc[k] as number[][], grad_W[k] as number[][]);
+        } else {
+          const g = grad_W[k] as number[];
+          const acc = grad_W_acc[k] as number[];
+          for (let j = 0; j < g.length; j++) acc[j] += g[j];
+        }
+        if (typeof grad_b[k] === "number") {
+          (grad_b_acc[k] as number) += grad_b[k] as number;
+        } else {
+          addVecInPlace(grad_b_acc[k] as number[], grad_b[k] as number[]);
+        }
+      }
+    }
+
+    if (t_data && u_data) {
+      for (let i = 0; i < t_data.length; i++) {
+        const t = t_data[i], u_target = u_data[i];
+        const f = this.forward(t, 0);
+        const err = f.u - u_target;
+        L_data += 0.5 * err * err;
+        const delta_N_data = w_data * err * t;
+        const { grad_W, grad_b } = this.backwardOnePoint(t, 0, 0, 0, delta_N_data, 0, 0);
+        for (let k = 0; k < this.depth; k++) {
+          if (Array.isArray(grad_W[k][0])) {
+            addMatInPlace(grad_W_acc[k] as number[][], grad_W[k] as number[][]);
+          } else {
+            const g = grad_W[k] as number[];
+            const acc = grad_W_acc[k] as number[];
+            for (let j = 0; j < g.length; j++) acc[j] += g[j];
+          }
+          if (typeof grad_b[k] === "number") {
+            (grad_b_acc[k] as number) += grad_b[k] as number;
+          } else {
+            addVecInPlace(grad_b_acc[k] as number[], grad_b[k] as number[]);
+          }
+        }
+      }
+    }
+
+    const W1 = grad_W_acc[0] as number[][];
+    for (let i = 0; i < W1.length; i++) W1[i][1] = 0;
+
+    const grads: Record<string, number[] | number[][] | number> = {};
+    for (let k = 0; k < this.depth; k++) {
+      grads[`W${k + 1}`] = grad_W_acc[k] as number[] | number[][];
+      grads[`b${k + 1}`] = grad_b_acc[k] as number[] | number;
+    }
+    grads.a = dL_res_da;
+
+    return {
+      losses: { L_res, L_grad: 0, L_data },
+      grads,
+    };
+  }
+
+  override evalU(t: number, _a?: number): number {
+    return super.evalU(t, 0);
   }
 }

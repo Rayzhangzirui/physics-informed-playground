@@ -1,11 +1,11 @@
 /**
- * Unit tests for BILO TS implementation.
+ * Unit tests for BILO and PINN TS implementation.
  * - Forward and loss tests (boundary, loss decrease, finite gradients, evalUArray).
  * - Snapshot export: run forward + backward, save weights and gradients to JSON
  *   for verification against PyTorch (run: python playground/bilo_np/verify_ts_gradients.py).
  */
 
-import { BILOModel } from "./bilo_nn";
+import { BILOModel, PINNModel } from "./bilo_nn";
 
 const DEFAULT_DEPTH = 2;
 
@@ -128,8 +128,73 @@ export function runBiloTests(): { pass: boolean; messages: string[] } {
   return { pass, messages };
 }
 
+// ---- PINN tests ----
+
+export function runPinnTests(): { pass: boolean; messages: string[] } {
+  const messages: string[] = [];
+  let pass = true;
+
+  {
+    const model = new PINNModel(4, DEFAULT_DEPTH, 42);
+    for (const a of [0, 0.5, 1, 2]) {
+      const u0 = model.evalU(0.5, a);
+      const u1 = model.evalU(0.5, 1);
+      if (Math.abs(u0 - u1) > 1e-10) {
+        pass = false;
+        messages.push(`FAIL: PINN u(0.5,${a}) = ${u0} != u(0.5,1) = ${u1}`);
+      }
+    }
+    if (pass) messages.push("PASS: PINN u(t) independent of a");
+  }
+
+  {
+    const model = new PINNModel(4, DEFAULT_DEPTH, 42);
+    const t_colloc = [0.25, 0.5, 0.75];
+    const a_colloc = [1, 1, 1];
+    const { losses: l0 } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
+    for (let i = 0; i < 100; i++) {
+      const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
+      applyGradients(model, grads, 0.01);
+    }
+    const { losses: l1 } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
+    if (l1.L_res >= l0.L_res) {
+      pass = false;
+      messages.push(`FAIL: PINN L_res did not decrease: ${l0.L_res} -> ${l1.L_res}`);
+    } else {
+      messages.push("PASS: PINN L_res decreases");
+    }
+  }
+
+  {
+    const model = new PINNModel(4, DEFAULT_DEPTH, 43);
+    const t_colloc = [0.2, 0.5, 0.8];
+    const a_colloc = [1.2, 1.2, 1.2];
+    const t_data = [0.3, 0.6];
+    const u_data = [1.5, 2.2];
+    const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, {
+      t_data, u_data, w_res: 1, w_data: 0.5,
+    });
+    const W1 = model._W[0] as number[][];
+    const gW1 = grads.W1 as number[][];
+    for (let j = 0; j < W1.length; j++) {
+      if (Math.abs(gW1[j][1]) > 1e-12) {
+        pass = false;
+        messages.push(`FAIL: PINN grad W1[:,1] should be 0, got ${gW1[j][1]}`);
+      }
+    }
+    if (typeof grads.a !== "number" || !isFinite(grads.a)) {
+      pass = false;
+      messages.push("FAIL: PINN grads.a missing or non-finite");
+    }
+    if (pass) messages.push("PASS: PINN grads (W1 col1=0, a present)");
+  }
+
+  return { pass, messages };
+}
+
 /** Snapshot shape for Python verification: weights, inputs, losses, gradients. */
 export interface BiloSnapshot {
+  model_type?: "bilo" | "pinn";
   n_hidden: number;
   depth: number;
   seed: number;
@@ -200,6 +265,7 @@ export function buildSnapshotForVerification(opts: {
     else gradCopy[key] = [...(g as number[])];
   }
   return {
+    model_type: "bilo",
     n_hidden,
     depth,
     seed,
@@ -212,6 +278,70 @@ export function buildSnapshotForVerification(opts: {
     u_data: u_data ? [...u_data] : undefined,
     w_res,
     w_grad,
+    w_data,
+    losses: { ...losses },
+    grads: gradCopy,
+  };
+}
+
+/**
+ * Build PINN snapshot for Python verification. Uses different number of
+ * residual collocation points vs data points (to stress-test the verifier).
+ */
+export function buildSnapshotForVerificationPinn(opts: {
+  n_hidden: number;
+  depth: number;
+  seed: number;
+  t_colloc: number[];
+  a_colloc: number[];
+  t_data: number[];
+  u_data: number[];
+  w_res?: number;
+  w_data?: number;
+}): BiloSnapshot {
+  const {
+    n_hidden,
+    depth,
+    seed,
+    t_colloc,
+    a_colloc,
+    t_data,
+    u_data,
+    w_res = 1,
+    w_data = 0.5,
+  } = opts;
+  const model = new PINNModel(n_hidden, depth, seed);
+  const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, {
+    t_data,
+    u_data,
+    w_res,
+    w_data,
+  });
+  const W = model._W.map(w =>
+    Array.isArray(w[0]) ? (w as number[][]).map(row => [...row]) : [...(w as number[])]
+  ) as (number[][] | number[])[];
+  const b = model._b.map(bb => (typeof bb === "number" ? bb : [...bb]));
+  const gradCopy: Record<string, number[] | number[][] | number> = {};
+  for (const key of Object.keys(grads)) {
+    const g = grads[key];
+    if (typeof g === "number") gradCopy[key] = g;
+    else if (Array.isArray(g[0])) gradCopy[key] = (g as number[][]).map(row => [...row]);
+    else gradCopy[key] = [...(g as number[])];
+  }
+  return {
+    model_type: "pinn",
+    n_hidden,
+    depth,
+    seed,
+    W,
+    b,
+    t_colloc: [...t_colloc],
+    a_colloc: [...a_colloc],
+    t_data: [...t_data],
+    a_data: a_colloc.length >= t_data.length ? a_colloc.slice(0, t_data.length) : undefined,
+    u_data: [...u_data],
+    w_res,
+    w_grad: 0,
     w_data,
     losses: { ...losses },
     grads: gradCopy,

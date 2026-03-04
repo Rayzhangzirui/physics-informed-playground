@@ -1,2 +1,2 @@
-/** Entry point for writing BILO snapshot (no test run). */
-export { buildSnapshotForVerification } from "./bilo";
+/** Entry point for writing BILO/PINN snapshots (no test run). */
+export { buildSnapshotForVerification, buildSnapshotForVerificationPinn } from "./bilo";

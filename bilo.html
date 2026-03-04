@@ -33,6 +33,15 @@
         <span class="value" id="iter-number">0</span>
       </div>
       <div class="control">
+        <label for="modelType">Model</label>
+        <div class="select">
+          <select id="modelType">
+            <option value="bilo">BILO (u(t,a;W))</option>
+            <option value="pinn">PINN (u(t;W), a param)</option>
+          </select>
+        </div>
+      </div>
+      <div class="control">
         <label for="mode">Mode</label>
         <div class="select">
           <select id="mode">
@@ -65,9 +74,9 @@
         <label for="wRes">w_res</label>
         <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input">
       </div>
-      <div class="control">
+      <div class="control" id="wGradControl">
         <label for="wGrad">w_grad</label>
-        <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input">
+        <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input" title="BILO only">
       </div>
       <div class="control">
         <label for="wData">w_data</label>

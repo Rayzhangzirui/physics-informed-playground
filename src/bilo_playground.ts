@@ -3,7 +3,7 @@
  */
 
 import * as d3 from "d3";
-import { BILOModel, runBiloTests } from "./bilo";
+import { BILOModel, PINNModel, runBiloTests, runPinnTests } from "./bilo";
 
 const RECT_SIZE = 32;
 const NETWORK_HEIGHT = 320;
@@ -18,7 +18,7 @@ const T_PLOT_MAX = 1; // u(t) only show t in [0, 1]
 const N_PLOT = 101;
 const HEATMAP_SAMPLES = 25;
 
-let model: BILOModel;
+let model: BILOModel | PINNModel;
 let iter = 0;
 let isPlaying = false;
 let timerId: number | null = null;
@@ -35,6 +35,7 @@ let wData = 0.5;
 let aParam = 1;      // network input a (pretrain fixed, finetune initial)
 let aParamGT = 2;    // ground-truth a for generating training data (dashed line)
 let noiseLevel = 0; // uniform noise added to training data: u += U(-noise, +noise)
+let modelType: "bilo" | "pinn" = "bilo";
 let mode: "pretrain" | "finetune" = "pretrain";
 let a_learned = 1;   // only used in finetune
 
@@ -46,9 +47,11 @@ let trainingData: { t_data: number[]; u_data: number[] } | null = null;
 
 // Run tests on load
 {
-  const { pass, messages } = runBiloTests();
+  const { pass: passBilo, messages: msgBilo } = runBiloTests();
+  const { pass: passPinn, messages: msgPinn } = runPinnTests();
   d3.select("#test-status").html(
-    messages.join("<br>") + (pass ? " <span style='color:green'>All tests passed.</span>" : " <span style='color:red'>Some tests failed.</span>")
+    "<b>BILO:</b> " + msgBilo.join("; ") + (passBilo ? " <span style='color:green'>OK</span>" : " <span style='color:red'>FAIL</span>") + " &nbsp; " +
+    "<b>PINN:</b> " + msgPinn.join("; ") + (passPinn ? " <span style='color:green'>OK</span>" : " <span style='color:red'>FAIL</span>")
   );
 }
 
@@ -57,7 +60,11 @@ function getTPoints(): number[] {
 }
 
 function buildModel() {
-  model = new BILOModel(nHidden, depthOption, 42);
+  if (modelType === "pinn") {
+    model = new PINNModel(nHidden, depthOption, 42);
+  } else {
+    model = new BILOModel(nHidden, depthOption, 42);
+  }
   t_colloc = getTPoints();
   a_learned = aParam;
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
@@ -83,21 +90,40 @@ function getDataForFinetune(): { t_data: number[]; u_data: number[]; a_data: num
 function oneStep() {
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
 
-  const opts: { w_res: number; w_grad: number; w_data?: number; t_data?: number[]; u_data?: number[]; a_data?: number[] } = {
-    w_res: wRes,
-    w_grad: wGrad,
-  };
-  if (mode === "finetune") {
-    const finetuneData = getDataForFinetune();
-    if (finetuneData) {
-      opts.w_data = wData;
-      opts.t_data = finetuneData.t_data;
-      opts.u_data = finetuneData.u_data;
-      opts.a_data = finetuneData.a_data;
-    }
-  }
+  let losses: { L_res: number; L_grad: number; L_data: number };
+  let grads: Record<string, number[] | number[][] | number>;
 
-  const { losses, grads } = model.computeLossesAndGradients(t_colloc, a_colloc, opts);
+  if (modelType === "pinn") {
+    const pinnOpts: { w_res: number; w_data?: number; t_data?: number[]; u_data?: number[] } = { w_res: wRes };
+    if (mode === "finetune") {
+      const finetuneData = getDataForFinetune();
+      if (finetuneData) {
+        pinnOpts.w_data = wData;
+        pinnOpts.t_data = finetuneData.t_data;
+        pinnOpts.u_data = finetuneData.u_data;
+      }
+    }
+    const out = (model as PINNModel).computeLossesAndGradientsPinn(t_colloc, a_colloc, pinnOpts);
+    losses = out.losses;
+    grads = out.grads;
+  } else {
+    const opts: { w_res: number; w_grad: number; w_data?: number; t_data?: number[]; u_data?: number[]; a_data?: number[] } = {
+      w_res: wRes,
+      w_grad: wGrad,
+    };
+    if (mode === "finetune") {
+      const finetuneData = getDataForFinetune();
+      if (finetuneData) {
+        opts.w_data = wData;
+        opts.t_data = finetuneData.t_data;
+        opts.u_data = finetuneData.u_data;
+        opts.a_data = finetuneData.a_data;
+      }
+    }
+    const out = (model as BILOModel).computeLossesAndGradients(t_colloc, a_colloc, opts);
+    losses = out.losses;
+    grads = out.grads;
+  }
 
   const lrScaled = lr;
   for (let k = 0; k < model.depth; k++) {
@@ -447,7 +473,7 @@ function redrawPlot() {
 
   const aDisplay = mode === "pretrain" ? aParam : a_learned;
   const tPlot = Array.from({ length: N_PLOT }, (_, i) => 0 + (T_PLOT_MAX - 0) * i / (N_PLOT - 1));
-  const uPred = model.evalUArray(tPlot, aDisplay);
+  const uPred = model.evalUArray(tPlot, aDisplay);  // PINNModel.evalU ignores second arg
   const uExact = tPlot.map(t => Math.exp(aParamGT * t));
 
   let yMax = Math.max(d3.max(uPred)!, d3.max(uExact)!);
@@ -557,6 +583,7 @@ function pause() {
 }
 
 function syncOptionsFromUI() {
+  modelType = (d3.select("#modelType").node() as HTMLSelectElement).value as "bilo" | "pinn";
   lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.02;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
   depthOption = Math.max(2, Math.min(5, +(d3.select("#depth").node() as HTMLInputElement).value || 2));
@@ -569,6 +596,9 @@ function syncOptionsFromUI() {
   aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
   noiseLevel = Math.max(0, Math.min(0.5, +(d3.select("#noise").node() as HTMLInputElement).value || 0));
   mode = (d3.select("#mode").node() as HTMLSelectElement).value as "pretrain" | "finetune";
+  const wGradControl = d3.select("#wGradControl");
+  if (modelType === "pinn") wGradControl.style("opacity", "0.5").style("pointer-events", "none");
+  else wGradControl.style("opacity", "1").style("pointer-events", "auto");
 }
 
 function init() {
@@ -586,6 +616,11 @@ function init() {
   d3.select("#learningRate").on("change", function() { syncOptionsFromUI(); });
   d3.select("#lrA").on("change", function() { syncOptionsFromUI(); });
 
+  d3.select("#modelType").on("change", function() {
+    syncOptionsFromUI();
+    pause();
+    reset();
+  });
   d3.select("#depth").on("change", function() {
     syncOptionsFromUI();
     pause();

@@ -1,0 +1,159 @@
+/* BILO page: match original TF Playground layout and sizing */
+
+#bilo-page #top-controls .container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 0 8px;
+}
+
+#bilo-page #top-controls .control {
+  flex: 0 0 auto;
+  max-width: 100px;
+  min-width: 70px;
+  margin-left: 0;
+  margin-top: 0;
+}
+
+#bilo-page #top-controls .control-input {
+  display: block;
+  width: 100%;
+  max-width: 70px;
+  padding: 4px 6px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  color: #333;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+#bilo-page #top-controls .control .select select {
+  padding: 4px 0;
+  font-size: 13px;
+  max-width: 140px;
+}
+
+#bilo-page #top-controls .control .value {
+  font-size: 18px;
+}
+
+/* Main part: strict 2-column layout (override original 3-column .features / .output widths) */
+#bilo-page #main-part {
+  display: flex;
+  flex-direction: row;
+  justify-content: stretch;
+  margin-top: 24px;
+  margin-bottom: 30px;
+  align-items: flex-start;
+  gap: 0;
+}
+
+#bilo-page #main-part .column.features.bilo-network-col {
+  width: 50%;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 50%;
+}
+
+#bilo-page #main-part .column.output.bilo-output-col {
+  width: 50%;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 50%;
+}
+
+#bilo-page .bilo-formula {
+  margin: 4px 0 12px 0;
+  font-size: 12px;
+  color: #777;
+}
+
+#bilo-page .bilo-plot-title {
+  margin: 12px 0 4px 0;
+  font-size: 13px;
+}
+
+#bilo-page .bilo-colormap-label {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #777;
+}
+
+/* Network diagram: larger, like original */
+#bilo-page #network {
+  position: relative;
+}
+
+#bilo-page #network-diagram svg {
+  display: block;
+}
+
+/* Network: heatmap canvases behind SVG (like original) */
+#bilo-page #network {
+  position: relative;
+}
+
+#bilo-page #network .canvas {
+  position: absolute;
+  border: 2px solid rgba(0,0,0,0.15);
+  border-radius: 3px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#bilo-page #network .canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* u(t) plot: larger */
+#bilo-page #plot-1d {
+  width: 100%;
+  height: 240px;
+}
+
+/* Loss chart: larger, room for y-tickers */
+#bilo-page #loss-chart {
+  width: 100%;
+  height: 140px;
+}
+
+/* Loss chart axes: thin lines, small text, avoid jamming (match original) */
+#bilo-page #loss-chart .axis path {
+  display: none;
+}
+
+#bilo-page #loss-chart .axis line {
+  fill: none;
+  stroke: #777;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+#bilo-page #loss-chart .axis text {
+  fill: #777;
+  font-size: 10px;
+}
+
+#bilo-page #loss-chart .axis.y-axis text {
+  font-size: 9px;
+}
+
+#bilo-page #plot-1d .axis path {
+  display: none;
+}
+
+#bilo-page #plot-1d .axis line {
+  fill: none;
+  stroke: #777;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+#bilo-page #plot-1d .axis text {
+  fill: #777;
+  font-size: 10px;
+}

@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1024">
+  <title>BILO Playground — u' = a·u</title>
+  <link rel="stylesheet" href="bundle.css" type="text/css">
+  <link rel="stylesheet" href="bilo.css" type="text/css">
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500|Material+Icons" rel="stylesheet">
+  <script src="lib.js"></script>
+</head>
+<body id="bilo-page">
+  <header>
+    <h1 class="l--page">BILO Playground — PDE <b>u' = a·u</b></h1>
+  </header>
+
+  <div id="top-controls">
+    <div class="container l--page">
+      <div class="timeline-controls">
+        <button class="mdl-button mdl-js-button mdl-button--icon" id="reset-button" title="Reset">
+          <i class="material-icons">replay</i>
+        </button>
+        <button class="mdl-button mdl-js-button mdl-button--fab mdl-button--colored" id="play-pause-button" title="Play/Pause">
+          <i class="material-icons">play_arrow</i>
+          <i class="material-icons">pause</i>
+        </button>
+        <button class="mdl-button mdl-js-button mdl-button--icon" id="step-button" title="Step">
+          <i class="material-icons">skip_next</i>
+        </button>
+      </div>
+      <div class="control">
+        <span class="label">Step</span>
+        <span class="value" id="iter-number">0</span>
+      </div>
+      <div class="control">
+        <label for="mode">Mode</label>
+        <div class="select">
+          <select id="mode">
+            <option value="pretrain">Pretrain (a fixed)</option>
+            <option value="finetune">Finetune (a from data)</option>
+          </select>
+        </div>
+      </div>
+      <div class="control">
+        <label for="nHidden">Hidden neurons</label>
+        <input type="number" id="nHidden" min="2" max="16" value="4" class="control-input">
+      </div>
+      <div class="control">
+        <label for="nPoints">Points</label>
+        <input type="number" id="nPoints" min="5" max="101" value="21" class="control-input">
+      </div>
+      <div class="control">
+        <label for="learningRate">Learning rate (W)</label>
+        <input type="number" id="learningRate" min="0.001" max="0.5" step="0.001" value="0.02" class="control-input">
+      </div>
+      <div class="control">
+        <label for="lrA">Learning rate (a)</label>
+        <input type="number" id="lrA" min="0.0001" max="0.05" step="0.0001" value="0.001" class="control-input">
+      </div>
+      <div class="control">
+        <label for="wRes">w_res</label>
+        <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input">
+      </div>
+      <div class="control">
+        <label for="wGrad">w_grad</label>
+        <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input">
+      </div>
+      <div class="control">
+        <label for="wData">w_data</label>
+        <input type="number" id="wData" min="0" max="2" step="0.1" value="0.5" class="control-input">
+      </div>
+      <div class="control">
+        <label for="aParam">Parameter a</label>
+        <input type="number" id="aParam" min="0.1" max="3" step="0.1" value="1" class="control-input">
+      </div>
+      <div class="control">
+        <label for="aParamGT">GT a</label>
+        <input type="number" id="aParamGT" min="0.1" max="3" step="0.1" value="2" class="control-input">
+      </div>
+      <div class="control">
+        <label for="noise">Noise</label>
+        <input type="number" id="noise" min="0" max="0.5" step="0.01" value="0" class="control-input">
+      </div>
+    </div>
+  </div>
+
+  <div id="main-part" class="l--page">
+    <div class="column features bilo-network-col">
+      <h4>Network</h4>
+      <div id="network"></div>
+      <p class="bilo-formula">u = 1 + t·N(t,a; W)</p>
+    </div>
+    <div class="column output bilo-output-col">
+      <h4>Output</h4>
+      <div class="metrics"></div>
+      <h4 class="bilo-plot-title">u(t) vs t</h4>
+      <div id="plot-1d"></div>
+      <h4 class="bilo-plot-title">Loss</h4>
+      <div id="loss-chart"></div>
+      <div class="bilo-colormap-label">Orange = negative, Blue = positive</div>
+    </div>
+  </div>
+
+  <div id="test-status" class="l--page" style="margin-top:12px; font-size:12px; color:#666;"></div>
+
+  <script src="bilo.js"></script>
+</body>
+</html>

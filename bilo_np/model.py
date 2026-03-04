@@ -364,6 +364,100 @@ class BILOModel:
         return out[0] if out.size == 1 else out.reshape(t.shape)
 
 
+# -----------------------------------------------------------------------------
+# PINN (Physics-Informed Neural Network)
+# -----------------------------------------------------------------------------
+# PINN differs from BILO:
+# - u(t; W): a is NOT input to the network. Implemented by W1[:,1]=0, never updated.
+# - Loss: L_res + L_data only (no residual gradient loss)
+# - a is a trainable parameter. R = u_t - a*u, so a participates in L_res only.
+# - dL_res/da = -sum(R*u) over collocation; dL_data/da = 0.
+# -----------------------------------------------------------------------------
+
+
+class PINNModel(BILOModel):
+    """PINN model: u(t; W) with a as trainable parameter. Reuses BILO architecture with W1[:,1]=0."""
+
+    def __init__(
+        self,
+        n_hidden: int,
+        depth: int = 2,
+        rng: np.random.Generator | None = None,
+    ):
+        super().__init__(n_hidden=n_hidden, depth=depth, rng=rng)
+        # Zero weights for input a so a has no influence on the network
+        self._W[0][:, 1] = 0.0
+
+    def compute_losses_and_gradients_pinn(
+        self,
+        t_colloc: np.ndarray,
+        a_colloc: np.ndarray,
+        t_data: np.ndarray | None = None,
+        u_data: np.ndarray | None = None,
+        w_res: float = 1.0,
+        w_data: float = 1.0,
+    ) -> tuple[dict[str, float], dict[str, np.ndarray | float]]:
+        """Compute L_res + L_data and gradients w.r.t. W and a.
+
+        L_res = 0.5 * MSE(u_t - a*u) over collocation; a participates, dL_res/da = -sum(R*u).
+        L_data = 0.5 * MSE(u - u_data) over data; a does not participate.
+        W1[:,1] gradients are zeroed (never update a-input weights).
+        """
+        L_res = 0.0
+        L_data = 0.0
+        grad_W_acc = [np.zeros_like(w) for w in self._W]
+        grad_b_acc = [np.zeros_like(b) for b in self._b]
+        dL_res_da = 0.0
+
+        # Collocation points: L_res only (no L_grad), add dL_res/da = -R*u
+        for i in range(len(t_colloc)):
+            t, a = float(t_colloc[i]), float(a_colloc[i])
+            _, _, _, _, u, u_t, _, _, _, _ = self.forward(t, a)
+            R = u_t - a * u
+            L_res += 0.5 * R * R
+            dL_res_da += -R * u  # dR/da = -u, dL_res = R*dR
+
+            gW, gb, _ = self._backward_one_point(
+                t, a, R, R_a=0.0, delta_N_data=0.0,
+                w_res=w_res, w_grad=0.0, w_data=0.0,
+            )
+            for j in range(len(grad_W_acc)):
+                grad_W_acc[j] += gW[j]
+                grad_b_acc[j] += gb[j]
+
+        # Data points: L_data only; a does not participate
+        if t_data is not None and u_data is not None:
+            for i in range(len(t_data)):
+                t, u_target = float(t_data[i]), float(u_data[i])
+                a_dummy = 0.0  # any value; u does not depend on a
+                _, _, _, _, u, _, _, _, _, _ = self.forward(t, a_dummy)
+                err = u - u_target
+                L_data += 0.5 * err * err
+                delta_N_data = w_data * err * t
+                gW, gb, _ = self._backward_one_point(
+                    t, a_dummy, R=0.0, R_a=0.0, delta_N_data=delta_N_data,
+                    w_res=0.0, w_grad=0.0, w_data=w_data,
+                )
+                for j in range(len(grad_W_acc)):
+                    grad_W_acc[j] += gW[j]
+                    grad_b_acc[j] += gb[j]
+
+        # Never update W1[:,1]
+        grad_W_acc[0][:, 1] = 0.0
+
+        losses = {"L_res": L_res, "L_grad": 0.0, "L_data": L_data}
+        grads = {}
+        for k in range(self.depth):
+            grads[f"W{k+1}"] = grad_W_acc[k]
+            grads[f"b{k+1}"] = grad_b_acc[k]
+        grads["a"] = dL_res_da
+        return losses, grads
+
+    def eval_u(self, t: np.ndarray | float, a: np.ndarray | float = 0.0) -> np.ndarray | float:
+        """Evaluate u(t; W). a is ignored (network does not use it); kept for API compatibility."""
+        return super().eval_u(t, a)
+
+
 try:
     import torch
     import torch.nn as nn
@@ -466,5 +560,29 @@ try:
             N = self.forward_N_only(t, a)
             return 1.0 + t * N
 
+    class PINNModelTorch(BILOModelTorch):
+        """PINN model for PyTorch gradient verification.
+
+        Reuses BILOModelTorch with W1[:,1]=0 (fixed, non-trainable) and a as nn.Parameter.
+        Forward uses self.a for residual R = u_t - a*u. Network output u does not depend on a.
+        """
+
+        def __init__(self, n_hidden: int, depth: int = 2, seed: int = 42, a_init: float = 1.0):
+            super().__init__(n_hidden=n_hidden, depth=depth, seed=seed)
+            self.a = nn.Parameter(torch.tensor(a_init, dtype=torch.float64))
+            # W1[:,1]=0 so a has no influence on network output (non-trainable)
+            with torch.no_grad():
+                self._W[0][:, 1] = 0.0
+
+        def forward(self, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            """Returns N, u, u_t, R. Uses self.a for residual (network ignores a via W1[:,1]=0)."""
+            N, u, u_t, u_a, u_ta, R, R_a = super().forward(t, self.a)
+            return N, u, u_t, R
+
+        def eval_u(self, t: torch.Tensor) -> torch.Tensor:
+            """Evaluate u(t; W). a is ignored; uses self.a for API consistency."""
+            return super().eval_u(t, self.a)
+
 except ImportError:
     BILOModelTorch = None  # type: ignore
+    PINNModelTorch = None  # type: ignore

@@ -20,15 +20,16 @@ from visualize import plot_loss_history, plot_solution_multi_a, plot_solution_2d
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="BILO training: u' = a*u")
-    parser.add_argument("--n-hidden", type=int, default=8, help="Hidden layer size")
-    parser.add_argument("--n-colloc", type=int, default=31, help="Number of collocation points")
-    parser.add_argument("--n-pretrain", type=int, default=1000, help="Pretrain iterations (fix a=1)")
-    parser.add_argument("--n-finetune", type=int, default=1000, help="Finetune iterations (update W and a)")
-    parser.add_argument("--lr", type=float, default=0.02, help="Learning rate for W")
+    parser.add_argument("--n-hidden",'-n', type=int, default=8, help="Hidden layer size")
+    parser.add_argument("--depth",'-d', type=int, default=2, help="Network depth (2 = one hidden layer)")
+    parser.add_argument("--n-colloc", type=int, default=21, help="Number of collocation points")
+    parser.add_argument("--n-pretrain",'-p', type=int, default=1000, help="Pretrain iterations (fix a=1)")
+    parser.add_argument("--n-finetune",'-f', type=int, default=1000, help="Finetune iterations (update W and a)")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for W")
     parser.add_argument("--lr-a", type=float, default=0.001, help="Learning rate for a (finetune)")
     parser.add_argument("--w-res", type=float, default=1.0, help="Weight for L_res")
     parser.add_argument("--w-grad", type=float, default=0.1, help="Weight for L_grad")
-    parser.add_argument("--w-data", type=float, default=0.5, help="Weight for L_data (finetune)")
+    parser.add_argument("--w-data", type=float, default=1.0, help="Weight for L_data (finetune)")
     parser.add_argument("--n-data", type=int, default=21, help="Number of data points for finetune")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--log-every", type=int, default=200, help="Log every N steps")
@@ -52,7 +53,7 @@ def main() -> None:
     a_pretrain = 1.0
     a_colloc = np.full_like(t_colloc, a_pretrain)
 
-    model = BILOModel(n_hidden=args.n_hidden)
+    model = BILOModel(n_hidden=args.n_hidden, depth=args.depth)
     print("=" * 60)
     print("Stage 1: Pretraining (fix a=1, t in [0,1])")
     print("=" * 60)

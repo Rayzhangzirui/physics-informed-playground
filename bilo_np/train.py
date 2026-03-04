@@ -44,12 +44,10 @@ def train_finetune(
         L_data = losses["L_data"]
         L_total = L_res + L_grad + L_data
 
-        # Update W
-        model.W1t -= lr * grads["W1t"]
-        model.W1a -= lr * grads["W1a"]
-        model.b1 -= lr * grads["b1"]
-        model.W2 -= lr * grads["W2"]
-        model.b2 -= lr * grads["b2"]
+        # Update W and b for all layers
+        for k in range(model.depth):
+            model._W[k] -= lr * grads[f"W{k+1}"]
+            model._b[k] -= lr * grads[f"b{k+1}"]
 
         # Update a
         if "a" in grads:
@@ -122,11 +120,9 @@ def train(
         L_total = L_res + L_grad + L_data
 
         # Gradient descent
-        model.W1t -= lr * grads["W1t"]
-        model.W1a -= lr * grads["W1a"]
-        model.b1 -= lr * grads["b1"]
-        model.W2 -= lr * grads["W2"]
-        model.b2 -= lr * grads["b2"]
+        for k in range(model.depth):
+            model._W[k] -= lr * grads[f"W{k+1}"]
+            model._b[k] -= lr * grads[f"b{k+1}"]
 
         rec = {
             "step": step,

@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.log
 .vscode
+# python temp files
+__pycache__/

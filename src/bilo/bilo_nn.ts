@@ -250,17 +250,28 @@ export class BILOModel {
 
   /** Returns sigma (hidden activation) of the first hidden layer on a (t,a) grid. [neuronIdx][ix][iy]. */
   getSigmaGrid(tGrid: number[], aGrid: number[]): number[][][] {
-    const out: number[][][] = [];
+    const all = this.getSigmaGridAllLayers(tGrid, aGrid);
+    return all.length > 0 ? all[0] : [];
+  }
+
+  /** Returns sigma for every hidden layer on a (t,a) grid. [layerIdx][neuronIdx][ix][iy]. */
+  getSigmaGridAllLayers(tGrid: number[], aGrid: number[]): number[][][][] {
+    const numLayers = this.depth - 1; // hidden layers
     const n = this.n_hidden;
-    for (let j = 0; j < n; j++) {
-      out[j] = [];
-      for (let ix = 0; ix < tGrid.length; ix++) {
-        out[j][ix] = [];
-        for (let iy = 0; iy < aGrid.length; iy++) {
-          const f = this.forward(tGrid[ix], aGrid[iy]);
-          out[j][ix][iy] = f.sigma_list[0] ? f.sigma_list[0].sigma[j] : 0;
+    const out: number[][][][] = [];
+    for (let layer = 0; layer < numLayers; layer++) {
+      const layerGrid: number[][][] = [];
+      for (let j = 0; j < n; j++) {
+        layerGrid[j] = [];
+        for (let ix = 0; ix < tGrid.length; ix++) {
+          layerGrid[j][ix] = [];
+          for (let iy = 0; iy < aGrid.length; iy++) {
+            const f = this.forward(tGrid[ix], aGrid[iy]);
+            layerGrid[j][ix][iy] = f.sigma_list[layer] ? f.sigma_list[layer].sigma[j] : 0;
+          }
         }
       }
+      out.push(layerGrid);
     }
     return out;
   }

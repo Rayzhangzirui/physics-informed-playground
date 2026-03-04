@@ -81,9 +81,12 @@
   color: #777;
 }
 
-/* Network diagram: larger, like original */
+/* Network diagram: scroll horizontally when depth > 2 */
 #bilo-page #network {
   position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 320px;
 }
 
 #bilo-page #network-diagram svg {

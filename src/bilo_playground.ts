@@ -6,8 +6,12 @@ import * as d3 from "d3";
 import { BILOModel, runBiloTests } from "./bilo";
 
 const RECT_SIZE = 32;
-const NETWORK_WIDTH = 380;
 const NETWORK_HEIGHT = 320;
+/** Width grows with depth so layers fit; min for 2 layers. */
+function getNetworkWidth(): number {
+  const d = model ? model.depth : 2;
+  return Math.max(380, 80 * (d + 2));
+}
 const T_MIN = 0;
 const T_MAX = 1;
 const T_PLOT_MAX = 1; // u(t) only show t in [0, 1]
@@ -22,6 +26,7 @@ let timerId: number | null = null;
 // Options (from UI)
 let lr = 0.02;
 let lrA = 0.001;
+let depthOption = 2; // 2 = one hidden layer, 3 = two hidden, …
 let nHidden = 4;
 let nPoints = 21;    // same points for residual and data loss
 let wRes = 1;
@@ -52,7 +57,7 @@ function getTPoints(): number[] {
 }
 
 function buildModel() {
-  model = new BILOModel(nHidden, 2, 42);
+  model = new BILOModel(nHidden, depthOption, 42);
   t_colloc = getTPoints();
   a_learned = aParam;
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
@@ -201,27 +206,35 @@ function fillHeatmapCanvasU(canvas: HTMLCanvasElement, data: number[][]) {
 function drawNetwork(container: d3.Selection<any>) {
   container.selectAll("*").remove();
 
-  // Four layers: [t, a] -> [h0..h(n-1)] -> [N] -> [u]; u = 1 + t*N
-  const layers = [
-    { ids: ["t", "a"], labels: ["t", "a"] },
-    {
-      ids: Array.from({ length: nHidden }, (_, i) => "h" + i),
-      labels: model.W2.map((_, i) => (model.W2[i] * 100).toFixed(0)),
-    },
-    { ids: ["N"], labels: ["N"] },
-    { ids: ["u"], labels: ["u"] },
-  ];
+  const d = model.depth;
+  const numHiddenLayers = d - 1;
+  // Layers: [t, a] -> hidden_0 -> ... -> hidden_{d-2} -> [N] -> [u]
+  const layers: { ids: string[]; labels: string[]; layerIndex?: number }[] = [];
+  layers.push({ ids: ["t", "a"], labels: ["t", "a"] });
+  for (let L = 0; L < numHiddenLayers; L++) {
+    const ids = Array.from({ length: nHidden }, (_, i) => `L${L}-${i}`);
+    const Wnext = model._W[L + 1];
+    const isLastHidden = L === numHiddenLayers - 1;
+    const labels = ids.map((_, j) => {
+      if (isLastHidden) return ((Wnext as number[])[j] * 100).toFixed(0);
+      const row = (Wnext as number[][])[j];
+      return row ? (row[0] * 100).toFixed(0) : "";
+    });
+    layers.push({ ids, labels, layerIndex: L });
+  }
+  layers.push({ ids: ["N"], labels: ["N"] });
+  layers.push({ ids: ["u"], labels: ["u"] });
 
+  const networkWidth = getNetworkWidth();
   const padding = 24;
   const totalH = NETWORK_HEIGHT - 2 * padding;
   const numLayers = layers.length;
-  const layerWidth = (NETWORK_WIDTH - 2 * padding) / (numLayers + 1);
+  const layerWidth = Math.min(56, (networkWidth - 2 * padding) / (numLayers + 1));
 
   const node2coord: { [id: string]: { cx: number; cy: number } } = {};
   layers.forEach((layer, li) => {
     const nx = layer.ids.length;
-    const spacing =
-      nx > 1 ? Math.min(48, totalH / Math.max(1, nx - 1)) : 0;
+    const spacing = nx > 1 ? Math.min(40, totalH / Math.max(1, nx - 1)) : 0;
     const startY = padding + (totalH - (nx - 1) * spacing) / 2;
     const cx = padding + (li + 1) * layerWidth;
     layer.ids.forEach((id, j) => {
@@ -230,87 +243,58 @@ function drawNetwork(container: d3.Selection<any>) {
     });
   });
 
-  // Heatmap data for hidden neurons (t = x, a = y)
   const tGrid = Array.from(
     { length: HEATMAP_SAMPLES },
-    (_, i) =>
-      HEATMAP_T_DOMAIN[0] +
-      (HEATMAP_T_DOMAIN[1] - HEATMAP_T_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
+    (_, i) => HEATMAP_T_DOMAIN[0] + (HEATMAP_T_DOMAIN[1] - HEATMAP_T_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
   );
   const aGrid = Array.from(
     { length: HEATMAP_SAMPLES },
-    (_, i) =>
-      HEATMAP_A_DOMAIN[0] +
-      (HEATMAP_A_DOMAIN[1] - HEATMAP_A_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
+    (_, i) => HEATMAP_A_DOMAIN[0] + (HEATMAP_A_DOMAIN[1] - HEATMAP_A_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
   );
-  const sigmaGrid = model.getSigmaGrid(tGrid, aGrid);
+  const sigmaGridAll = model.getSigmaGridAllLayers(tGrid, aGrid);
   const nGrid = model.getNGrid(tGrid, aGrid);
   const uGrid = model.getUGrid(tGrid, aGrid);
 
-  // Insert heatmap divs for N and u (so they appear behind hidden layer heatmaps)
-  ["N", "u"].forEach((id, idx) => {
+  // Heatmaps for N and u
+  ["N", "u"].forEach((id) => {
     const pos = node2coord[id];
     if (!pos) return;
     const left = pos.cx - RECT_SIZE / 2;
     const top = pos.cy - RECT_SIZE / 2;
-    const div = container
-      .insert("div", ":first-child")
-      .attr("id", "canvas-" + id)
-      .attr("class", "canvas")
-      .style("position", "absolute")
-      .style("left", left + "px")
-      .style("top", top + "px")
-      .style("width", RECT_SIZE + "px")
-      .style("height", RECT_SIZE + "px");
-    const canvas = div
-      .append("canvas")
-      .attr("width", HEATMAP_SAMPLES)
-      .attr("height", HEATMAP_SAMPLES)
-      .style("width", "100%")
-      .style("height", "100%");
-    if (id === "N") {
-      fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, nGrid, RECT_SIZE);
-    } else {
-      fillHeatmapCanvasU(canvas.node() as HTMLCanvasElement, uGrid);
-    }
+    const div = container.insert("div", ":first-child")
+      .attr("id", "canvas-" + id).attr("class", "canvas")
+      .style("position", "absolute").style("left", left + "px").style("top", top + "px")
+      .style("width", RECT_SIZE + "px").style("height", RECT_SIZE + "px");
+    const canvas = div.append("canvas").attr("width", HEATMAP_SAMPLES).attr("height", HEATMAP_SAMPLES)
+      .style("width", "100%").style("height", "100%");
+    if (id === "N") fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, nGrid, RECT_SIZE);
+    else fillHeatmapCanvasU(canvas.node() as HTMLCanvasElement, uGrid);
   });
 
-  // Insert heatmap divs for hidden neurons (behind SVG, like original)
-  for (let j = 0; j < nHidden; j++) {
-    const id = "h" + j;
-    const pos = node2coord[id];
-    const left = pos.cx - RECT_SIZE / 2;
-    const top = pos.cy - RECT_SIZE / 2;
-    const div = container
-      .insert("div", ":first-child")
-      .attr("id", "canvas-" + id)
-      .attr("class", "canvas")
-      .style("position", "absolute")
-      .style("left", left + "px")
-      .style("top", top + "px")
-      .style("width", RECT_SIZE + "px")
-      .style("height", RECT_SIZE + "px");
-    const canvas = div
-      .append("canvas")
-      .attr("width", HEATMAP_SAMPLES)
-      .attr("height", HEATMAP_SAMPLES)
-      .style("width", "100%")
-      .style("height", "100%");
-    fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, sigmaGrid[j], RECT_SIZE);
+  // Heatmaps for every hidden neuron (each layer)
+  for (let layerIdx = 0; layerIdx < numHiddenLayers; layerIdx++) {
+    const grid = sigmaGridAll[layerIdx];
+    if (!grid) continue;
+    for (let j = 0; j < nHidden; j++) {
+      const id = `L${layerIdx}-${j}`;
+      const pos = node2coord[id];
+      if (!pos) continue;
+      const left = pos.cx - RECT_SIZE / 2;
+      const top = pos.cy - RECT_SIZE / 2;
+      const div = container.insert("div", ":first-child")
+        .attr("id", "canvas-" + id).attr("class", "canvas")
+        .style("position", "absolute").style("left", left + "px").style("top", top + "px")
+        .style("width", RECT_SIZE + "px").style("height", RECT_SIZE + "px");
+      const canvas = div.append("canvas").attr("width", HEATMAP_SAMPLES).attr("height", HEATMAP_SAMPLES)
+        .style("width", "100%").style("height", "100%");
+      fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, grid[j], RECT_SIZE);
+    }
   }
 
-  const svg = container
-    .append("svg")
-    .attr("width", NETWORK_WIDTH)
-    .attr("height", NETWORK_HEIGHT);
+  const svg = container.append("svg").attr("width", networkWidth).attr("height", NETWORK_HEIGHT);
   const g = svg.append("g").attr("class", "core");
 
-  // Links: t,a -> every h; every h -> N; N -> u
-  function drawLink(
-    fromId: string,
-    toId: string,
-    weight: number
-  ) {
+  function drawLink(fromId: string, toId: string, weight: number) {
     const from = node2coord[fromId];
     const to = node2coord[toId];
     if (!from || !to) return;
@@ -320,21 +304,28 @@ function drawNetwork(container: d3.Selection<any>) {
     const y2 = to.cy;
     const strokeW = Math.max(0.5, Math.abs(weight) * 3);
     g.insert("line", ":first-child")
-      .attr("x1", x1)
-      .attr("y1", y1)
-      .attr("x2", x2)
-      .attr("y2", y2)
-      .attr("stroke", colorScale(Math.tanh(weight)))
-      .attr("stroke-width", strokeW);
+      .attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2)
+      .attr("stroke", colorScale(Math.tanh(weight)) as any).attr("stroke-width", strokeW);
   }
 
-  layers[1].ids.forEach((toId, j) => {
-    drawLink("t", toId, model.W1t[j]);
-    drawLink("a", toId, model.W1a[j]);
-  });
-  layers[1].ids.forEach((fromId, j) => {
-    drawLink(fromId, "N", model.W2[j]);
-  });
+  // Links: input -> hidden0; hidden_k -> hidden_{k+1}; last hidden -> N; N -> u
+  const W0 = model._W[0] as number[][];
+  for (let j = 0; j < nHidden; j++) {
+    drawLink("t", `L0-${j}`, W0[j][0]);
+    drawLink("a", `L0-${j}`, W0[j][1]);
+  }
+  for (let L = 0; L < numHiddenLayers - 1; L++) {
+    const Wk = model._W[L + 1] as number[][];
+    for (let i = 0; i < nHidden; i++) {
+      for (let j = 0; j < nHidden; j++) {
+        drawLink(`L${L}-${i}`, `L${L + 1}-${j}`, Wk[j][i]);
+      }
+    }
+  }
+  const Wlast = model._W[d - 1] as number[];
+  for (let j = 0; j < nHidden; j++) {
+    drawLink(`L${numHiddenLayers - 1}-${j}`, "N", Wlast[j]);
+  }
   drawLink("N", "u", 1);
 
   // Node rects and labels
@@ -342,22 +333,19 @@ function drawNetwork(container: d3.Selection<any>) {
     layer.ids.forEach((id, j) => {
       const { cx, cy } = node2coord[id];
       let fillColor = "#888";
-      if (li === 1) fillColor = colorScale(Math.tanh(model.W2[j])) as any;
-      else if (li === 2) fillColor = colorScale(0) as any;
-      else if (li === 3) fillColor = "#333";
+      if (layer.layerIndex !== undefined) {
+        const lastHidden = layer.layerIndex === numHiddenLayers - 1;
+        const w = lastHidden ? (model._W[d - 1] as number[])[j] : 0;
+        fillColor = colorScale(Math.tanh(w)) as any;
+      } else if (id === "N") fillColor = colorScale(0) as any;
+      else if (id === "u") fillColor = "#333";
       g.append("rect")
-        .attr("x", cx - RECT_SIZE / 2)
-        .attr("y", cy - RECT_SIZE / 2)
-        .attr("width", RECT_SIZE)
-        .attr("height", RECT_SIZE)
-        .attr("fill", fillColor)
-        .attr("stroke", "#333")
-        .attr("stroke-width", 1);
+        .attr("x", cx - RECT_SIZE / 2).attr("y", cy - RECT_SIZE / 2)
+        .attr("width", RECT_SIZE).attr("height", RECT_SIZE)
+        .attr("fill", fillColor).attr("stroke", "#333").attr("stroke-width", 1);
       g.append("text")
-        .attr("x", cx)
-        .attr("y", cy + 4)
-        .attr("text-anchor", "middle")
-        .attr("font-size", li === 0 ? "12px" : "11px")
+        .attr("x", cx).attr("y", cy + 4).attr("text-anchor", "middle")
+        .attr("font-size", li === 0 ? "12px" : "10px")
         .text(layer.labels[j] || id);
     });
   });
@@ -571,6 +559,7 @@ function pause() {
 function syncOptionsFromUI() {
   lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.02;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
+  depthOption = Math.max(2, Math.min(5, +(d3.select("#depth").node() as HTMLInputElement).value || 2));
   nHidden = Math.max(2, Math.min(16, +(d3.select("#nHidden").node() as HTMLInputElement).value || 4));
   nPoints = Math.max(5, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
   wRes = +(d3.select("#wRes").node() as HTMLInputElement).value || 1;
@@ -597,6 +586,11 @@ function init() {
   d3.select("#learningRate").on("change", function() { syncOptionsFromUI(); });
   d3.select("#lrA").on("change", function() { syncOptionsFromUI(); });
 
+  d3.select("#depth").on("change", function() {
+    syncOptionsFromUI();
+    pause();
+    reset();
+  });
   d3.select("#nHidden").on("change", function() {
     syncOptionsFromUI();
     pause();

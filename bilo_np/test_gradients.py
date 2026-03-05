@@ -7,6 +7,14 @@ Tests cover:
 - Multiple depths: 1 hidden layer (depth=2) and 2 hidden layers (depth=3)
 """
 
+import sys
+from pathlib import Path
+
+# Ensure this directory is on path so "from model import ..." works when run via pytest from any cwd
+_src = Path(__file__).resolve().parent
+if str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
+
 import numpy as np
 import pytest
 
@@ -36,13 +44,14 @@ def sync_weights_np_to_torch(np_model: BILOModel, torch_model: "BILOModelTorch")
 # ---- Forward match ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_forward_match(depth: int):
-    """Forward pass outputs should match between NumPy and PyTorch for depth 2 and 3."""
+def test_forward_match(ode_type: str, depth: int):
+    """Forward pass outputs should match between NumPy and PyTorch for depth 2,3,4 and both ODE types."""
     np.random.seed(42)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t, a = 0.5, 1.0
@@ -52,27 +61,27 @@ def test_forward_match(depth: int):
         torch.tensor(a, dtype=torch.float64, requires_grad=True),
     )
 
-    assert np.isclose(N_np, N_torch.item()), f"N mismatch depth={depth}"
-    assert np.isclose(u_np, u_torch.item()), f"u mismatch depth={depth}"
-    assert np.isclose(u_t_np, u_t_torch.item()), f"u_t mismatch depth={depth}"
-    assert np.isclose(u_a_np, u_a_torch.item()), f"u_a mismatch depth={depth}"
-    assert np.isclose(u_ta_np, u_ta_torch.item()), f"u_ta mismatch depth={depth}"
-    R_np = u_t_np - a * u_np
-    R_a_np = u_ta_np - (u_np + a * u_a_np)
-    assert np.isclose(R_np, R_torch.item()), f"R mismatch depth={depth}"
-    assert np.isclose(R_a_np, Ra_torch.item()), f"R_a mismatch depth={depth}"
+    assert np.isclose(N_np, N_torch.item()), f"N mismatch depth={depth} ode={ode_type}"
+    assert np.isclose(u_np, u_torch.item()), f"u mismatch depth={depth} ode={ode_type}"
+    assert np.isclose(u_t_np, u_t_torch.item()), f"u_t mismatch depth={depth} ode={ode_type}"
+    assert np.isclose(u_a_np, u_a_torch.item()), f"u_a mismatch depth={depth} ode={ode_type}"
+    assert np.isclose(u_ta_np, u_ta_torch.item()), f"u_ta mismatch depth={depth} ode={ode_type}"
+    R_np, R_a_np = np_model.residuals(t, a)
+    assert np.isclose(R_np, R_torch.item()), f"R mismatch depth={depth} ode={ode_type}"
+    assert np.isclose(R_a_np, Ra_torch.item()), f"R_a mismatch depth={depth} ode={ode_type}"
 
 
 # ---- Gradients w.r.t. weights: residual + gradient loss ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_residual_gradients_match(depth: int):
+def test_residual_gradients_match(ode_type: str, depth: int):
     """Manual gradients for L_res + L_grad should match PyTorch autograd."""
     np.random.seed(42)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t_colloc = np.array([0.5])
@@ -92,25 +101,26 @@ def test_residual_gradients_match(depth: int):
     for k in range(depth):
         assert np.allclose(
             grads_np[f"W{k+1}"], torch_model._W[k].grad.numpy(), rtol=rtol, atol=atol
-        ), f"W{k+1} grad mismatch depth={depth}"
+        ), f"W{k+1} grad mismatch depth={depth} ode={ode_type}"
         gb = torch_model._b[k].grad
         bn = grads_np[f"b{k+1}"]
         if np.ndim(bn) == 0:
-            assert np.isclose(bn, gb.item(), rtol=rtol, atol=atol), f"b{k+1} grad mismatch depth={depth}"
+            assert np.isclose(bn, gb.item(), rtol=rtol, atol=atol), f"b{k+1} grad mismatch depth={depth} ode={ode_type}"
         else:
-            assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol), f"b{k+1} grad mismatch depth={depth}"
+            assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol), f"b{k+1} grad mismatch depth={depth} ode={ode_type}"
 
 
 # ---- Gradients w.r.t. weights: data loss ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_data_loss_gradients_match(depth: int):
+def test_data_loss_gradients_match(ode_type: str, depth: int):
     """Manual gradients for L_data (w.r.t. all W and b) should match PyTorch autograd."""
     np.random.seed(43)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t_data = np.array([0.3])
@@ -151,13 +161,14 @@ def test_data_loss_gradients_match(depth: int):
 # ---- Gradient w.r.t. input a (dL_data/da) ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_data_loss_gradient_wrt_a(depth: int):
+def test_data_loss_gradient_wrt_a(ode_type: str, depth: int):
     """Manual gradient dL_data/da should match PyTorch autograd."""
     np.random.seed(45)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t_data = np.array([0.5])
@@ -190,13 +201,14 @@ def test_data_loss_gradient_wrt_a(depth: int):
 # ---- Gradients w.r.t. inputs t and a (dN/dt, dN/da, d²N/dtda) ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_gradients_wrt_t_and_a(depth: int):
+def test_gradients_wrt_t_and_a(ode_type: str, depth: int):
     """Compare NumPy N, N_t, N_a, N_ta and PyTorch autograd derivatives of N w.r.t. t and a."""
     np.random.seed(46)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t_val, a_val = 0.5, 1.0
@@ -221,13 +233,14 @@ def test_gradients_wrt_t_and_a(depth: int):
 # ---- Combined loss gradients ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
 @pytest.mark.parametrize("depth", [2, 3, 4])
-def test_combined_loss_gradients_match(depth: int):
+def test_combined_loss_gradients_match(ode_type: str, depth: int):
     """Manual gradients for L_res + L_grad + L_data should match PyTorch autograd."""
     np.random.seed(44)
     n_hidden = 4
-    np_model = BILOModel(n_hidden, depth=depth)
-    torch_model = BILOModelTorch(n_hidden, depth=depth)
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
     sync_weights_np_to_torch(np_model, torch_model)
 
     t_colloc = np.array([0.25, 0.5, 0.75])

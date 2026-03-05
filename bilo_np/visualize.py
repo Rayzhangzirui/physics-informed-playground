@@ -4,7 +4,15 @@ from pathlib import Path
 
 import numpy as np
 
-from model import BILOModel
+from model import BILOModel, logistic_solution, U0_LOGISTIC
+
+
+def _exact_u(t: np.ndarray, a: np.ndarray | float, ode_type: str) -> np.ndarray:
+    """Exact solution: exponential u=exp(a*t), logistic u=u0*e^{at}/(1+u0*(e^{at}-1)). Supports arrays."""
+    if ode_type == "exponential":
+        return np.exp(a * t)
+    eat = np.exp(a * t)
+    return (U0_LOGISTIC * eat) / (1.0 + U0_LOGISTIC * (eat - 1.0))
 
 
 def plot_solution_multi_a(
@@ -15,6 +23,7 @@ def plot_solution_multi_a(
     n_pts: int = 201,
     save_path: str | Path | None = None,
     show: bool = True,
+    ode_type: str | None = None,
 ) -> None:
     """Plot u(t,a) vs t for multiple a values."""
     try:
@@ -22,17 +31,19 @@ def plot_solution_multi_a(
     except ImportError:
         raise ImportError("matplotlib required for visualization")
 
+    ode = ode_type or getattr(model, "ode_type", "exponential")
     t_plot = np.linspace(t_min, t_max, n_pts)
     fig, ax = plt.subplots(figsize=(8, 5))
     for a in a_values:
         a_plot = np.full_like(t_plot, a)
         u_pred = model.eval_u(t_plot, a_plot)
-        u_exact = np.exp(a * t_plot)
+        u_exact = _exact_u(t_plot, a, ode)
         ax.plot(t_plot, u_pred, "-", label=f"u(t,{a:.2f};W) (BILO)")
-        ax.plot(t_plot, u_exact, "--", alpha=0.6, label=f"exp({a:.2f}*t) (exact)")
+        ax.plot(t_plot, u_exact, "--", alpha=0.6, label=f"exact a={a:.2f}")
     ax.set_xlabel("t")
     ax.set_ylabel("u")
-    ax.set_title("BILO solution vs exact: PDE u' = a*u")
+    title = "u'=a*u*(1-u)" if ode == "logistic" else "u'=a*u"
+    ax.set_title(f"BILO solution vs exact: PDE {title}")
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.set_xlim(t_min, t_max)
@@ -104,20 +115,19 @@ def plot_solution_after_finetune(
     n_pts: int = 201,
     save_path: str | Path | None = None,
     show: bool = True,
+    ode_type: str | None = None,
 ) -> None:
-    """Plot solution after fine-tuning: data scatter, BILO u(t,a_learned), and u_a = exp(a_learned*t).
-
-    u_a is the ODE solution u' = a*u with u(0)=1 using the inferred a from BILO.
-    """
+    """Plot solution after fine-tuning: data scatter, BILO u(t,a_learned), and exact u with inferred a."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         raise ImportError("matplotlib required for visualization")
 
+    ode = ode_type or getattr(model, "ode_type", "exponential")
     t_plot = np.linspace(t_min, t_max, n_pts)
     a_plot = np.full_like(t_plot, a_learned)
     u_bilo = model.eval_u(t_plot, a_plot)
-    u_a = np.exp(a_learned * t_plot)  # ODE solution with inferred a
+    u_a = _exact_u(t_plot, a_learned, ode)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(t_data, u_data, c="k", s=30, alpha=0.8, label="data", zorder=3)
@@ -149,27 +159,20 @@ def plot_solution_2d(
     n_a: int = 51,
     save_path: str | Path | None = None,
     show: bool = True,
+    ode_type: str | None = None,
 ) -> None:
-    """Plot u(t,a) as 2D heatmap.
-
-    Args:
-        model: trained BILOModel
-        t_min, t_max: t range
-        a_min, a_max: a range
-        n_t, n_a: grid resolution
-        save_path: path to save figure
-        show: whether to plt.show()
-    """
+    """Plot u(t,a) as 2D heatmap."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         raise ImportError("matplotlib required for visualization")
 
+    ode = ode_type or getattr(model, "ode_type", "exponential")
     t_plot = np.linspace(t_min, t_max, n_t)
     a_plot = np.linspace(a_min, a_max, n_a)
     T, A = np.meshgrid(t_plot, a_plot)
     U_pred = model.eval_u(T, A)
-    U_exact = np.exp(A * T)
+    U_exact = _exact_u(T, A, ode)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
 
@@ -181,10 +184,11 @@ def plot_solution_2d(
 
     im1 = axes[1].pcolormesh(T, A, U_exact, shading="auto", cmap="viridis")
     axes[1].set_xlabel("t")
-    axes[1].set_title("exp(a*t) (exact)")
+    axes[1].set_title("exact")
     plt.colorbar(im1, ax=axes[1])
 
-    fig.suptitle("BILO solution vs exact: PDE u' = a*u")
+    title = "u'=a*u*(1-u)" if ode == "logistic" else "u'=a*u"
+    fig.suptitle(f"BILO solution vs exact: PDE {title}")
     plt.tight_layout()
 
     if save_path:

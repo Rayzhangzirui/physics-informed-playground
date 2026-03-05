@@ -1,11 +1,12 @@
 """Main entry point: train BILO and visualize.
 
-PDE: u' = a*u
-Trial solution: u(t,a;W) = 1 + t*N(t,a;W)
+PDEs:
+  - exponential: u' = a*u, u(0)=1. Trial u = 1 + t*N(t,a;W).
+  - logistic: u' = a*u*(1-u), u(0)=u0=0.1. Trial u = u0 + t*N(t,a;W).
 
 Two-stage training:
-  - Stage 1 (pretrain): fix a=1, t in [0,1], update W
-  - Stage 2 (finetune): data from ground truth a=2, update W and a
+  - Stage 1 (pretrain): fix a, t in [0,1], update W
+  - Stage 2 (finetune): data from ground truth a, update W and a
 """
 
 import argparse
@@ -13,13 +14,15 @@ from pathlib import Path
 
 import numpy as np
 
-from model import BILOModel, PINNModel
+from model import BILOModel, PINNModel, logistic_solution
 from train import train, train_finetune, train_pinn, train_pinn_finetune
 from visualize import plot_loss_history, plot_solution_multi_a, plot_solution_2d, plot_solution_after_finetune
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="BILO/PINN training: u' = a*u")
+    parser = argparse.ArgumentParser(description="BILO/PINN training: u'=a*u or u'=a*u*(1-u)")
+    parser.add_argument("--pde", type=str, choices=["exponential", "logistic"], default="exponential",
+                        help="PDE: exponential (u'=au) or logistic (u'=au(1-u), u0=0.1)")
     parser.add_argument("--model", "-m", type=str, choices=["bilo", "pinn"], default="bilo",
                         help="Model: bilo (BILO, u(t,a;W)) or pinn (PINN, u(t;W) with a as param)")
     parser.add_argument("--n-hidden",'-n', type=int, default=8, help="Hidden layer size")
@@ -38,6 +41,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=200, help="Log every N steps")
     parser.add_argument("--out-dir", type=str, default=None, help="Output directory (default: bilo/output)")
     parser.add_argument("--no-plot", action="store_true", help="Skip plotting")
+    # ground truth a
+    parser.add_argument("--agt", type=float, default=2.0, help="Ground truth a")
     return parser.parse_args()
 
 
@@ -45,15 +50,19 @@ def main() -> None:
     args = parse_args()
     np.random.seed(args.seed)
 
+    ode_type = args.pde
     out_dir = Path(args.out_dir) if args.out_dir else Path(__file__).parent / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    prefix = args.model
+    prefix = f"{args.model}_{ode_type}"
 
     t_min, t_max = 0.0, 1.0
     t_colloc = np.linspace(t_min, t_max, args.n_colloc)
-    a_gt = 2.0
+    a_gt = args.agt
     t_data = np.linspace(t_min, t_max, args.n_data)
-    u_data = np.exp(a_gt * t_data)
+    if ode_type == "exponential":
+        u_data = np.exp(a_gt * t_data)
+    else:
+        u_data = logistic_solution(t_data, a_gt)
     if args.std > 0:
         u_data = u_data + args.std * np.random.randn(args.n_data)
 
@@ -62,9 +71,9 @@ def main() -> None:
 
     # Create model
     if args.model == "bilo":
-        model = BILOModel(n_hidden=args.n_hidden, depth=args.depth)
+        model = BILOModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type)
     else:
-        model = PINNModel(n_hidden=args.n_hidden, depth=args.depth)
+        model = PINNModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type)
 
     # Stage 1: Pretrain (fix a, update W — solve PDE forward)
     print("=" * 60)
@@ -92,6 +101,7 @@ def main() -> None:
             plot_solution_multi_a(
                 model, a_values=[0.8, 1.0, 1.2], t_min=0.0, t_max=1.0,
                 save_path=out_dir / f"{prefix}_after_pretrain.png", show=False,
+                ode_type=ode_type,
             )
         except ImportError:
             pass
@@ -137,6 +147,7 @@ def main() -> None:
                 t_max=1.0,
                 save_path=out_dir / f"{prefix}_solution_after_finetune.png",
                 show=False,
+                ode_type=ode_type,
             )
             if args.model == "bilo":
                 plot_solution_multi_a(
@@ -145,12 +156,14 @@ def main() -> None:
                     t_min=0.0, t_max=1.0,
                     save_path=out_dir / f"{prefix}_after_finetune.png",
                     show=False,
+                    ode_type=ode_type,
                 )
                 plot_solution_2d(
                     model,
                     t_min=0.0, t_max=2.0, a_min=0.5, a_max=2.5,
                     save_path=out_dir / f"{prefix}_solution_2d.png",
                     show=False,
+                    ode_type=ode_type,
                 )
         except ImportError:
             print("matplotlib not installed, skipping plots")

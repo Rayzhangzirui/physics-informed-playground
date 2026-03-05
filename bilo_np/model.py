@@ -1,14 +1,14 @@
 """BILO model: manual implementation with NumPy and PyTorch.
 
-The problem is the ODE u_t = au, with u(0) = 1. The solution can be represented by
-u(t,a) = 1 + t*N(t,a), where N(t,a) is the network output.
+Supports two ODEs:
 
-For the BILO formulation, we have:
-- residual: R = u_t - a*u = 0
-- residual gradient: R_a = u_ta - (u + a*u_a) = 0
-- residual loss is MSE of R
-- residual gradient loss is MSE of R_a
-- data loss is MSE of u - u_data
+1) Exponential: u_t = a*u, u(0)=1. Trial u = 1 + t*N(t,a).
+   R = u_t - a*u, R_a = u_ta - (u + a*u_a).
+
+2) Logistic: u_t = a*u*(1-u), u(0)=u0 (default 0.1). Trial u = u0 + t*N(t,a).
+   R = u_t - a*u*(1-u), R_a = u_ta - u(1-u) - a*u_a*(1-2u).
+
+Residual loss L_res = MSE(R), residual gradient loss L_grad = MSE(R_a), data loss L_data = MSE(u - u_data).
 
 Architecture (d-layer PINN):
 - Input: x = [t, a] in R^2, h_0 = x
@@ -24,7 +24,12 @@ For tanh: sigma' = 1 - sigma^2, sigma'' = -2*sigma*sigma', sigma''' = 2*sigma'*(
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
+
+ODE_TYPE = Literal["exponential", "logistic"]
+U0_LOGISTIC = 0.1
 
 
 def _tanh_derivatives(z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -36,12 +41,20 @@ def _tanh_derivatives(z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray
     return sigma, sigma_p, sigma_pp, sigma_ppp
 
 
+def logistic_solution(t: np.ndarray, a: float, u0: float = U0_LOGISTIC) -> np.ndarray:
+    """Analytical solution for u_t = a*u*(1-u), u(0)=u0: u(t) = u0*e^{at} / (1 + u0*(e^{at}-1))."""
+    eat = np.exp(a * t)
+    return (u0 * eat) / (1.0 + u0 * (eat - 1.0))
+
+
 class BILOModel:
     """BILO model with manual backprop in NumPy, generalized to d hidden layers.
 
     Parameters:
         n_hidden: width n of each hidden layer
         depth: number of layers d (depth=2 => one hidden layer, depth=3 => two hidden, etc.)
+        ode_type: "exponential" (u'=au, u(0)=1) or "logistic" (u'=au(1-u), u(0)=u0)
+        u0: initial condition for logistic (default 0.1)
         Weights: W1 (n, 2), b1 (n,); W_k (n, n), b_k (n,) for k=2..d-1; W_d (n,), b_d scalar
     """
 
@@ -49,12 +62,16 @@ class BILOModel:
         self,
         n_hidden: int,
         depth: int = 2,
+        ode_type: ODE_TYPE = "exponential",
+        u0: float = U0_LOGISTIC,
         rng: np.random.Generator | None = None,
     ):
         if depth < 2:
             raise ValueError("depth must be >= 2 (input -> at least one hidden -> output)")
         self.n_hidden = n_hidden
         self.depth = depth
+        self.ode_type = ode_type
+        self.u0 = u0
         self.rng = rng or np.random.default_rng(42)
         n = n_hidden
         d = depth
@@ -171,6 +188,7 @@ class BILOModel:
         """Forward pass. Returns (N, N_t, N_a, N_ta, u, u_t, u_a, u_ta, h_list, sigma_list).
 
         sigma_list[k] = (sigma, sigma_p, sigma_pp, sigma_ppp) at layer k+1 for k=0..d-2.
+        For exponential: u = 1 + t*N; for logistic: u = u0 + t*N.
         """
         (
             N, N_t, N_a, N_ta,
@@ -179,7 +197,10 @@ class BILOModel:
             sigma_list,
         ) = self._forward_and_kinematics(t, a)
 
-        u = 1.0 + t * N
+        if self.ode_type == "exponential":
+            u = 1.0 + t * N
+        else:
+            u = self.u0 + t * N
         u_t = N + t * N_t
         u_a = t * N_a
         u_ta = N_a + t * N_ta
@@ -189,8 +210,13 @@ class BILOModel:
     def residuals(self, t: float, a: float) -> tuple[float, float]:
         """Compute R and R_a at (t, a)."""
         _, _, _, _, u, u_t, u_a, u_ta, _, _ = self.forward(t, a)
-        R = u_t - a * u
-        R_a = u_ta - (u + a * u_a)
+        if self.ode_type == "exponential":
+            R = u_t - a * u
+            R_a = u_ta - (u + a * u_a)
+        else:
+            # logistic: u_t = a*u*(1-u) => R = u_t - a*u*(1-u), R_a = u_ta - u(1-u) - a*u_a*(1-2u)
+            R = u_t - a * u * (1.0 - u)
+            R_a = u_ta - u * (1.0 - u) - a * u_a * (1.0 - 2.0 * u)
         return R, R_a
 
     def _backward_one_point(
@@ -216,13 +242,29 @@ class BILOModel:
             sigma_list,
         ) = self._forward_and_kinematics(t, a)
 
-        # Upstream gradients from loss: L_res = 0.5*R^2, L_grad = 0.5*R_a^2
-        # dL_res/dN = R * dR/dN = R*(1 - a*t), dL_res/dN_t = R*t, dL_res/dN_a = 0, dL_res/dN_ta = 0
-        # dL_grad/dN = R_a * (-t), dL_grad/dN_t = 0, dL_grad/dN_a = R_a*(1 - a*t), dL_grad/dN_ta = R_a*t
-        delta_N = w_res * R * (1.0 - a * t) - w_grad * R_a * t + delta_N_data
-        delta_N_t = w_res * R * t
-        delta_N_a = w_grad * R_a * (1.0 - a * t)
-        delta_N_ta = w_grad * R_a * t
+        if self.ode_type == "exponential":
+            u = 1.0 + t * N
+            # dR/dN = 1 - a*t, dR/dN_t = t; dR_a/dN = -t, dR_a/dN_a = 1 - a*t, dR_a/dN_ta = t
+            delta_N = w_res * R * (1.0 - a * t) - w_grad * R_a * t + delta_N_data
+            delta_N_t = w_res * R * t
+            delta_N_a = w_grad * R_a * (1.0 - a * t)
+            delta_N_ta = w_grad * R_a * t
+        else:
+            # logistic: u = u0 + t*N, u_a = t*N_a
+            u = self.u0 + t * N
+            u_a = t * N_a
+            # R = u_t - a*u*(1-u): dR/dN = 1 - a*(1-2u)*t, dR/dN_t = t
+            # R_a = u_ta - u(1-u) - a*u_a*(1-2u): dR_a/dN = -t*(1-2u) + 2*a*u_a*t;
+            #   dR_a/dN_a = 1 - a*t*(1-2u) (u(1-u) has no N_a, u_a has coeff t), dR_a/dN_ta = t
+            one_minus_2u = 1.0 - 2.0 * u
+            delta_N = (
+                w_res * R * (1.0 - a * t * one_minus_2u)
+                + w_grad * R_a * t * (-one_minus_2u + 2.0 * a * u_a)
+                + delta_N_data
+            )
+            delta_N_t = w_res * R * t
+            delta_N_a = w_grad * R_a * (1.0 - a * t * one_minus_2u)
+            delta_N_ta = w_grad * R_a * t
 
         # Output layer d: delta_h_{d-1} = W_d^T * delta_N (W_d is (n,), so W_d^T delta_N = delta_N * W_d)
         W_d = self._W[-1]
@@ -309,9 +351,7 @@ class BILOModel:
         # Collocation points
         for i in range(len(t_colloc)):
             t, a = float(t_colloc[i]), float(a_colloc[i])
-            _, _, _, _, u, u_t, u_a, u_ta, _, _ = self.forward(t, a)
-            R = u_t - a * u
-            R_a = u_ta - (u + a * u_a)
+            R, R_a = self.residuals(t, a)
             L_res += 0.5 * R * R
             L_grad += 0.5 * R_a * R_a
 
@@ -330,10 +370,9 @@ class BILOModel:
                 _, _, _, _, u, _, u_a, _, _, _ = self.forward(t, a)
                 err = u - u_target
                 L_data += 0.5 * err * err
-                # dL_data/dN = err * du/dN = err * t
+                # dL_data/dN = err * du/dN = err * t (same for exponential and logistic)
                 delta_N_data = w_data * err * t
-                R = 0.0
-                R_a = 0.0
+                R, R_a = 0.0, 0.0
                 gW, gb, _ = self._backward_one_point(
                     t, a, R, R_a, delta_N_data=delta_N_data,
                     w_res=0.0, w_grad=0.0, w_data=w_data,
@@ -382,9 +421,11 @@ class PINNModel(BILOModel):
         self,
         n_hidden: int,
         depth: int = 2,
+        ode_type: ODE_TYPE = "exponential",
+        u0: float = U0_LOGISTIC,
         rng: np.random.Generator | None = None,
     ):
-        super().__init__(n_hidden=n_hidden, depth=depth, rng=rng)
+        super().__init__(n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, rng=rng)
         # Zero weights for input a so a has no influence on the network
         self._W[0][:, 1] = 0.0
 
@@ -399,7 +440,7 @@ class PINNModel(BILOModel):
     ) -> tuple[dict[str, float], dict[str, np.ndarray | float]]:
         """Compute L_res + L_data and gradients w.r.t. W and a.
 
-        L_res = 0.5 * MSE(u_t - a*u) over collocation; a participates, dL_res/da = -sum(R*u).
+        L_res = 0.5 * MSE(R) over collocation; a participates (dL_res/da: exponential -R*u, logistic -R*u*(1-u)).
         L_data = 0.5 * MSE(u - u_data) over data; a does not participate.
         W1[:,1] gradients are zeroed (never update a-input weights).
         """
@@ -409,13 +450,16 @@ class PINNModel(BILOModel):
         grad_b_acc = [np.zeros_like(b) for b in self._b]
         dL_res_da = 0.0
 
-        # Collocation points: L_res only (no L_grad), add dL_res/da = -R*u
+        # Collocation points: L_res only (no L_grad), add dL_res/da
         for i in range(len(t_colloc)):
             t, a = float(t_colloc[i]), float(a_colloc[i])
             _, _, _, _, u, u_t, _, _, _, _ = self.forward(t, a)
-            R = u_t - a * u
+            R, _ = self.residuals(t, a)
             L_res += 0.5 * R * R
-            dL_res_da += -R * u  # dR/da = -u, dL_res = R*dR
+            if self.ode_type == "exponential":
+                dL_res_da += -R * u  # dR/da = -u
+            else:
+                dL_res_da += -R * u * (1.0 - u)  # dR/da = -u*(1-u) when u_a=0
 
             gW, gb, _ = self._backward_one_point(
                 t, a, R, R_a=0.0, delta_N_data=0.0,
@@ -467,13 +511,23 @@ try:
 
         Implements the same forward and forward-kinematics recurrence as BILOModel
         (N, N_t, N_a, N_ta from explicit recurrence) so autograd matches manual backprop.
+        Supports ode_type "exponential" and "logistic".
         """
 
-        def __init__(self, n_hidden: int, depth: int = 2, seed: int = 42):
+        def __init__(
+            self,
+            n_hidden: int,
+            depth: int = 2,
+            ode_type: ODE_TYPE = "exponential",
+            u0: float = U0_LOGISTIC,
+            seed: int = 42,
+        ):
             super().__init__()
             torch.manual_seed(seed)
             self.n_hidden = n_hidden
             self.depth = depth
+            self.ode_type = ode_type
+            self.u0 = u0
             dtype = torch.float64
             n, d = n_hidden, depth
             self._W = nn.ParameterList([
@@ -542,12 +596,19 @@ try:
         def forward(self, t: torch.Tensor, a: torch.Tensor) -> tuple[torch.Tensor, ...]:
             """Returns N, u, u_t, u_a, u_ta, R, R_a."""
             N, N_t, N_a, N_ta, _, _, _, _ = self._forward_and_kinematics(t, a)
-            u = 1.0 + t * N
+            if self.ode_type == "exponential":
+                u = 1.0 + t * N
+            else:
+                u = self.u0 + t * N
             u_t = N + t * N_t
             u_a = t * N_a
             u_ta = N_a + t * N_ta
-            R = u_t - a * u
-            R_a = u_ta - (u + a * u_a)
+            if self.ode_type == "exponential":
+                R = u_t - a * u
+                R_a = u_ta - (u + a * u_a)
+            else:
+                R = u_t - a * u * (1.0 - u)
+                R_a = u_ta - u * (1.0 - u) - a * u_a * (1.0 - 2.0 * u)
             return N, u, u_t, u_a, u_ta, R, R_a
 
         def forward_N_only(self, t: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
@@ -558,17 +619,27 @@ try:
         def eval_u(self, t: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
             """Evaluate u(t,a)."""
             N = self.forward_N_only(t, a)
-            return 1.0 + t * N
+            if self.ode_type == "exponential":
+                return 1.0 + t * N
+            return self.u0 + t * N
 
     class PINNModelTorch(BILOModelTorch):
         """PINN model for PyTorch gradient verification.
 
         Reuses BILOModelTorch with W1[:,1]=0 (fixed, non-trainable) and a as nn.Parameter.
-        Forward uses self.a for residual R = u_t - a*u. Network output u does not depend on a.
+        Forward uses self.a for residual. Network output u does not depend on a.
         """
 
-        def __init__(self, n_hidden: int, depth: int = 2, seed: int = 42, a_init: float = 1.0):
-            super().__init__(n_hidden=n_hidden, depth=depth, seed=seed)
+        def __init__(
+            self,
+            n_hidden: int,
+            depth: int = 2,
+            ode_type: ODE_TYPE = "exponential",
+            u0: float = U0_LOGISTIC,
+            seed: int = 42,
+            a_init: float = 1.0,
+        ):
+            super().__init__(n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, seed=seed)
             self.a = nn.Parameter(torch.tensor(a_init, dtype=torch.float64))
             # W1[:,1]=0 so a has no influence on network output (non-trainable)
             with torch.no_grad():

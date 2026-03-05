@@ -53,8 +53,8 @@ class BILOModel:
     Parameters:
         n_hidden: width n of each hidden layer
         depth: number of layers d (depth=2 => one hidden layer, depth=3 => two hidden, etc.)
-        ode_type: "exponential" (u'=au, u(0)=1) or "logistic" (u'=au(1-u), u(0)=u0)
-        u0: initial condition for logistic (default 0.1)
+        ode_type: "exponential" (u'=au, u(0)=u0) or "logistic" (u'=au(1-u), u(0)=u0)
+        u0: initial condition u(0). Default: 1.0 for exponential, 0.1 for logistic
         Weights: W1 (n, 2), b1 (n,); W_k (n, n), b_k (n,) for k=2..d-1; W_d (n,), b_d scalar
     """
 
@@ -63,7 +63,7 @@ class BILOModel:
         n_hidden: int,
         depth: int = 2,
         ode_type: ODE_TYPE = "exponential",
-        u0: float = U0_LOGISTIC,
+        u0: float | None = None,
         rng: np.random.Generator | None = None,
     ):
         if depth < 2:
@@ -71,7 +71,7 @@ class BILOModel:
         self.n_hidden = n_hidden
         self.depth = depth
         self.ode_type = ode_type
-        self.u0 = u0
+        self.u0 = u0 if u0 is not None else (1.0 if ode_type == "exponential" else U0_LOGISTIC)
         self.rng = rng or np.random.default_rng(42)
         n = n_hidden
         d = depth
@@ -188,7 +188,7 @@ class BILOModel:
         """Forward pass. Returns (N, N_t, N_a, N_ta, u, u_t, u_a, u_ta, h_list, sigma_list).
 
         sigma_list[k] = (sigma, sigma_p, sigma_pp, sigma_ppp) at layer k+1 for k=0..d-2.
-        For exponential: u = 1 + t*N; for logistic: u = u0 + t*N.
+        For both ODEs: u = u0 + t*N (u0 is configurable, default 1.0 for exponential, 0.1 for logistic).
         """
         (
             N, N_t, N_a, N_ta,
@@ -197,10 +197,7 @@ class BILOModel:
             sigma_list,
         ) = self._forward_and_kinematics(t, a)
 
-        if self.ode_type == "exponential":
-            u = 1.0 + t * N
-        else:
-            u = self.u0 + t * N
+        u = self.u0 + t * N
         u_t = N + t * N_t
         u_a = t * N_a
         u_ta = N_a + t * N_ta
@@ -243,7 +240,7 @@ class BILOModel:
         ) = self._forward_and_kinematics(t, a)
 
         if self.ode_type == "exponential":
-            u = 1.0 + t * N
+            u = self.u0 + t * N
             # dR/dN = 1 - a*t, dR/dN_t = t; dR_a/dN = -t, dR_a/dN_a = 1 - a*t, dR_a/dN_ta = t
             delta_N = w_res * R * (1.0 - a * t) - w_grad * R_a * t + delta_N_data
             delta_N_t = w_res * R * t
@@ -422,7 +419,7 @@ class PINNModel(BILOModel):
         n_hidden: int,
         depth: int = 2,
         ode_type: ODE_TYPE = "exponential",
-        u0: float = U0_LOGISTIC,
+        u0: float | None = None,
         rng: np.random.Generator | None = None,
     ):
         super().__init__(n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, rng=rng)
@@ -519,7 +516,7 @@ try:
             n_hidden: int,
             depth: int = 2,
             ode_type: ODE_TYPE = "exponential",
-            u0: float = U0_LOGISTIC,
+            u0: float | None = None,
             seed: int = 42,
         ):
             super().__init__()
@@ -527,7 +524,7 @@ try:
             self.n_hidden = n_hidden
             self.depth = depth
             self.ode_type = ode_type
-            self.u0 = u0
+            self.u0 = u0 if u0 is not None else (1.0 if ode_type == "exponential" else U0_LOGISTIC)
             dtype = torch.float64
             n, d = n_hidden, depth
             self._W = nn.ParameterList([
@@ -596,10 +593,7 @@ try:
         def forward(self, t: torch.Tensor, a: torch.Tensor) -> tuple[torch.Tensor, ...]:
             """Returns N, u, u_t, u_a, u_ta, R, R_a."""
             N, N_t, N_a, N_ta, _, _, _, _ = self._forward_and_kinematics(t, a)
-            if self.ode_type == "exponential":
-                u = 1.0 + t * N
-            else:
-                u = self.u0 + t * N
+            u = self.u0 + t * N
             u_t = N + t * N_t
             u_a = t * N_a
             u_ta = N_a + t * N_ta
@@ -619,8 +613,6 @@ try:
         def eval_u(self, t: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
             """Evaluate u(t,a)."""
             N = self.forward_N_only(t, a)
-            if self.ode_type == "exponential":
-                return 1.0 + t * N
             return self.u0 + t * N
 
     class PINNModelTorch(BILOModelTorch):
@@ -635,7 +627,7 @@ try:
             n_hidden: int,
             depth: int = 2,
             ode_type: ODE_TYPE = "exponential",
-            u0: float = U0_LOGISTIC,
+            u0: float | None = None,
             seed: int = 42,
             a_init: float = 1.0,
         ):

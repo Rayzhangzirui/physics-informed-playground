@@ -7,12 +7,19 @@ import numpy as np
 from model import BILOModel, logistic_solution, U0_LOGISTIC
 
 
-def _exact_u(t: np.ndarray, a: np.ndarray | float, ode_type: str) -> np.ndarray:
-    """Exact solution: exponential u=exp(a*t), logistic u=u0*e^{at}/(1+u0*(e^{at}-1)). Supports arrays."""
+def _exact_u(
+    t: np.ndarray,
+    a: np.ndarray | float,
+    ode_type: str,
+    u0: float | None = None,
+) -> np.ndarray:
+    """Exact solution: exponential u=u0*exp(a*t), logistic u=u0*e^{at}/(1+u0*(e^{at}-1)). Supports arrays."""
     if ode_type == "exponential":
-        return np.exp(a * t)
+        u0_val = u0 if u0 is not None else 1.0
+        return u0_val * np.exp(a * t)
+    u0_val = u0 if u0 is not None else U0_LOGISTIC
     eat = np.exp(a * t)
-    return (U0_LOGISTIC * eat) / (1.0 + U0_LOGISTIC * (eat - 1.0))
+    return (u0_val * eat) / (1.0 + u0_val * (eat - 1.0))
 
 
 def plot_solution_multi_a(
@@ -37,7 +44,7 @@ def plot_solution_multi_a(
     for a in a_values:
         a_plot = np.full_like(t_plot, a)
         u_pred = model.eval_u(t_plot, a_plot)
-        u_exact = _exact_u(t_plot, a, ode)
+        u_exact = _exact_u(t_plot, a, ode, u0=getattr(model, "u0", None))
         ax.plot(t_plot, u_pred, "-", label=f"u(t,{a:.2f};W) (BILO)")
         ax.plot(t_plot, u_exact, "--", alpha=0.6, label=f"exact a={a:.2f}")
     ax.set_xlabel("t")
@@ -127,7 +134,7 @@ def plot_solution_after_finetune(
     t_plot = np.linspace(t_min, t_max, n_pts)
     a_plot = np.full_like(t_plot, a_learned)
     u_bilo = model.eval_u(t_plot, a_plot)
-    u_a = _exact_u(t_plot, a_learned, ode)
+    u_a = _exact_u(t_plot, a_learned, ode, u0=getattr(model, "u0", None))
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(t_data, u_data, c="k", s=30, alpha=0.8, label="data", zorder=3)
@@ -152,27 +159,37 @@ def plot_solution_after_finetune(
 def plot_solution_2d(
     model: BILOModel,
     t_min: float = 0.0,
-    t_max: float = 2.0,
-    a_min: float = 0.5,
-    a_max: float = 2.0,
+    t_max: float = 1.2,
+    a_min: float | None = None,
+    a_max: float | None = None,
+    a_init: float | None = None,
+    a_gt: float | None = None,
     n_t: int = 101,
     n_a: int = 51,
     save_path: str | Path | None = None,
     show: bool = True,
     ode_type: str | None = None,
 ) -> None:
-    """Plot u(t,a) as 2D heatmap."""
+    """Plot u(t,a) as 2D heatmap. If a_init and a_gt are provided, a_min=0.8*a_init, a_max=1.2*a_gt."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         raise ImportError("matplotlib required for visualization")
 
     ode = ode_type or getattr(model, "ode_type", "exponential")
+    if a_min is None and a_init is not None:
+        a_min = 0.8 * a_init
+    if a_max is None and a_gt is not None:
+        a_max = 1.2 * a_gt
+    if a_min is None:
+        a_min = 0.5
+    if a_max is None:
+        a_max = 2.0
     t_plot = np.linspace(t_min, t_max, n_t)
     a_plot = np.linspace(a_min, a_max, n_a)
     T, A = np.meshgrid(t_plot, a_plot)
     U_pred = model.eval_u(T, A)
-    U_exact = _exact_u(T, A, ode)
+    U_exact = _exact_u(T, A, ode, u0=getattr(model, "u0", None))
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
 

@@ -281,3 +281,81 @@ def test_combined_loss_gradients_match(ode_type: str, depth: int):
             assert np.isclose(bn, gb.item(), rtol=rtol, atol=atol)
         else:
             assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol)
+
+
+# ---- ADAM: NumPy vs PyTorch (few steps, loose tol for numerical differences) ----
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+def test_adam_numpy_vs_torch(ode_type: str):
+    """Run a few steps of ADAM in NumPy (train.py) and in PyTorch; final parameters should be close.
+
+    Uses 3 steps and loose tolerances: PyTorch and our NumPy ADAM can differ slightly due to
+    order of operations and floating-point rounding.
+    """
+    np.random.seed(123)
+    n_hidden = 4
+    depth = 2
+    np_model = BILOModel(n_hidden, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden, depth=depth, ode_type=ode_type)
+    sync_weights_np_to_torch(np_model, torch_model)
+
+    # Save initial weights so we can restore torch model to same init for fair comparison
+    init_W = [w.copy() for w in np_model._W]
+    init_b = [np.array(b, copy=True, ndmin=1).reshape(np.shape(b)) for b in np_model._b]
+
+    t_colloc = np.array([0.25, 0.5, 0.75])
+    a_colloc = np.array([1.0, 1.0, 1.0])
+    lr = 0.01
+    w_res, w_grad = 1.0, 0.1
+    n_steps = 100
+
+    from train import train, ADAM_BETA1, ADAM_BETA2, ADAM_EPS
+
+    # NumPy: n_steps ADAM
+    train(
+        np_model, t_colloc, a_colloc,
+        n_iters=n_steps, lr=lr, w_res=w_res, w_grad=w_grad, w_data=0.0,
+        log_every=1000, optimizer="adam",
+    )
+
+    # Restore torch model to same initial weights and run n_steps with torch.optim.Adam
+    with torch.no_grad():
+        for k in range(depth):
+            torch_model._W[k].copy_(torch.from_numpy(init_W[k]))
+            b = init_b[k]
+            if b.size == 1:
+                torch_model._b[k].copy_(torch.tensor(b.flat[0], dtype=torch.float64))
+            else:
+                torch_model._b[k].copy_(torch.from_numpy(b))
+
+    opt = torch.optim.Adam(
+        torch_model.parameters(),
+        lr=lr,
+        betas=(ADAM_BETA1, ADAM_BETA2),
+        eps=ADAM_EPS,
+    )
+    for _ in range(n_steps):
+        opt.zero_grad()
+        loss = torch.tensor(0.0, dtype=torch.float64)
+        for i in range(len(t_colloc)):
+            t = torch.tensor(t_colloc[i], dtype=torch.float64, requires_grad=True)
+            a = torch.tensor(a_colloc[i], dtype=torch.float64, requires_grad=True)
+            _, _, _, _, _, R, R_a = torch_model(t, a)
+            loss = loss + 0.5 * R * R * w_res + 0.5 * R_a * R_a * w_grad
+        loss.backward()
+        opt.step()
+
+    # Compare final parameters (NumPy vs PyTorch); loose tol for float/implementation differences
+    rtol, atol = 1e-5, 1e-6
+    for k in range(depth):
+        w_np = np_model._W[k]
+        w_pt = torch_model._W[k].detach().numpy()
+        assert np.allclose(w_np, w_pt, rtol=rtol, atol=atol), (
+            f"W{k+1} mismatch after {n_steps} ADAM steps (ode={ode_type})"
+        )
+        b_np = np.asarray(np_model._b[k], dtype=np.float64).reshape(-1)
+        b_pt = torch_model._b[k].detach().numpy().reshape(-1)
+        assert np.allclose(b_np, b_pt, rtol=rtol, atol=atol), (
+            f"b{k+1} mismatch after {n_steps} ADAM steps (ode={ode_type})"
+        )

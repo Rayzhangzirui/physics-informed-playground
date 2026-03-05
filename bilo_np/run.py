@@ -41,8 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=200, help="Log every N steps")
     parser.add_argument("--out-dir", type=str, default=None, help="Output directory (default: bilo/output)")
     parser.add_argument("--no-plot", action="store_true", help="Skip plotting")
-    # ground truth a
-    parser.add_argument("--agt", type=float, default=2.0, help="Ground truth a")
+    parser.add_argument("--u0", type=float, default=None,
+                        help="Initial condition u(0). Default: 1.0 (exponential) or 0.1 (logistic)")
+    parser.add_argument("--ainit", type=float, default=1.0, help="Initial a for pretraining")
+    parser.add_argument("--agt", type=float, default=2.0, help="Ground truth a (for data generation)")
+    parser.add_argument("--optimizer",'-o', type=str, choices=["gd", "adam"], default="gd",
+                        help="Optimizer: gd (gradient descent) or adam")
     return parser.parse_args()
 
 
@@ -58,26 +62,29 @@ def main() -> None:
     t_min, t_max = 0.0, 1.0
     t_colloc = np.linspace(t_min, t_max, args.n_colloc)
     a_gt = args.agt
+    a_init = args.ainit
+    u0 = args.u0
+    if u0 is None:
+        u0 = 1.0 if ode_type == "exponential" else 0.1
     t_data = np.linspace(t_min, t_max, args.n_data)
     if ode_type == "exponential":
-        u_data = np.exp(a_gt * t_data)
+        u_data = u0 * np.exp(a_gt * t_data)
     else:
-        u_data = logistic_solution(t_data, a_gt)
+        u_data = logistic_solution(t_data, a_gt, u0=u0)
     if args.std > 0:
         u_data = u_data + args.std * np.random.randn(args.n_data)
 
-    a_pretrain = 1.0
-    a_colloc = np.full_like(t_colloc, a_pretrain)
+    a_colloc = np.full_like(t_colloc, a_init)
 
     # Create model
     if args.model == "bilo":
-        model = BILOModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type)
+        model = BILOModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type, u0=u0)
     else:
-        model = PINNModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type)
+        model = PINNModel(n_hidden=args.n_hidden, depth=args.depth, ode_type=ode_type, u0=u0)
 
     # Stage 1: Pretrain (fix a, update W — solve PDE forward)
     print("=" * 60)
-    print("Stage 1: Pretraining (fix a=1, L_res only)")
+    print(f"Stage 1: Pretraining (fix a={a_init}, u0={u0}, L_res only)")
     if args.model == "bilo":
         print("  BILO: L_res + L_grad")
     else:
@@ -88,6 +95,7 @@ def main() -> None:
             model, t_colloc, a_colloc,
             n_iters=args.n_pretrain, lr=args.lr,
             w_res=args.w_res, w_grad=args.w_grad, w_data=0.0, log_every=args.log_every,
+            optimizer=args.optimizer,
         )
     else:
         history_pretrain, _ = train_pinn(
@@ -112,14 +120,15 @@ def main() -> None:
     print("=" * 60)
     if args.model == "bilo":
         history_finetune, a_learned = train_finetune(
-            model, t_colloc, a_learned=a_pretrain,
+            model, t_colloc, a_learned=a_init,
             t_data=t_data, u_data=u_data,
             n_iters=args.n_finetune, lr=args.lr, lr_a=args.lr_a,
             w_res=args.w_res, w_grad=args.w_grad, w_data=args.w_data, log_every=args.log_every,
+            optimizer=args.optimizer,
         )
     else:
         history_finetune, a_learned = train_pinn_finetune(
-            model, t_colloc, a_learned=a_pretrain,
+            model, t_colloc, a_learned=a_init,
             t_data=t_data, u_data=u_data,
             n_iters=args.n_finetune, lr=args.lr, lr_a=args.lr_a,
             w_res=args.w_res, w_data=args.w_data, log_every=args.log_every,
@@ -160,7 +169,8 @@ def main() -> None:
                 )
                 plot_solution_2d(
                     model,
-                    t_min=0.0, t_max=2.0, a_min=0.5, a_max=2.5,
+                    t_min=0.0, t_max=1.2,
+                    a_init=a_init, a_gt=a_gt,
                     save_path=out_dir / f"{prefix}_solution_2d.png",
                     show=False,
                     ode_type=ode_type,

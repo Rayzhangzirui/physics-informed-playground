@@ -6,8 +6,6 @@ import * as d3 from "d3";
 import {
   BILOModel,
   PINNModel,
-  runBiloTests,
-  runPinnTests,
   adamStepModel,
   adamStepA,
   type OdeType,
@@ -55,15 +53,6 @@ let a_colloc: number[];
 // Training data for finetune (fixed until next reset; includes noise)
 let trainingData: { t_data: number[]; u_data: number[] } | null = null;
 
-// Run tests on load
-{
-  const { pass: passBilo, messages: msgBilo } = runBiloTests();
-  const { pass: passPinn, messages: msgPinn } = runPinnTests();
-  d3.select("#test-status").html(
-    "<b>BILO:</b> " + msgBilo.join("; ") + (passBilo ? " <span style='color:green'>OK</span>" : " <span style='color:red'>FAIL</span>") + " &nbsp; " +
-    "<b>PINN:</b> " + msgPinn.join("; ") + (passPinn ? " <span style='color:green'>OK</span>" : " <span style='color:red'>FAIL</span>")
-  );
-}
 
 /** Residual/collocation points for L_res (and L_grad in BILO). */
 function getResidualPoints(): number[] {
@@ -155,7 +144,7 @@ function oneStep() {
     adamStepModel(model as BILOModel, grads, adamState, step1, lr);
     if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
       a_learned = adamStepA(a_learned, grads.a, adamState, step1, lrA);
-      a_learned = Math.max(0.1, Math.min(3, a_learned));
+      a_learned = Math.max(0.1, Math.min(10, a_learned));
     }
   } else {
     const lrScaled = lr;
@@ -177,7 +166,7 @@ function oneStep() {
       else for (let i = 0; i < (bk as number[]).length; i++) (bk as number[])[i] -= lrScaled * (gbk as number[])[i];
     }
     if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
-      a_learned = Math.max(0.1, Math.min(3, a_learned - lrA * grads.a));
+      a_learned = Math.max(0.1, Math.min(10, a_learned - lrA * grads.a));
     }
   }
 
@@ -186,16 +175,18 @@ function oneStep() {
   updateUI();
 }
 
-type LossPoint = { step: number; L_res: number; L_grad: number; L_data: number };
+type LossPoint = { step: number; L_res: number; L_grad: number; L_data: number; L_op?: number };
 let lossHistory: LossPoint[] = [];
 const LOSS_HISTORY_MAX = 500;
 
 function pushLossPoint(losses: { L_res: number; L_grad: number; L_data: number }) {
+  const L_op = wRes * losses.L_res + wGrad * losses.L_grad;
   lossHistory.push({
     step: iter,
     L_res: losses.L_res,
     L_grad: losses.L_grad,
     L_data: losses.L_data,
+    L_op,
   });
   if (lossHistory.length > LOSS_HISTORY_MAX) lossHistory.shift();
 }
@@ -272,9 +263,9 @@ function drawNetwork(container: d3.Selection<any>) {
 
   const d = model.depth;
   const numHiddenLayers = d - 1;
-  // Layers: [t, a] -> hidden_0 -> ... -> hidden_{d-2} -> [N] -> [u]
+  // Layers: [t, a] (or [t] for PINN) -> hidden_0 -> ... -> [N] -> [u]
   const layers: { ids: string[]; labels: string[]; layerIndex?: number }[] = [];
-  layers.push({ ids: ["t", "a"], labels: ["t", "a"] });
+  layers.push(modelType === "pinn" ? { ids: ["t"], labels: ["t"] } : { ids: ["t", "a"], labels: ["t", "a"] });
   for (let L = 0; L < numHiddenLayers; L++) {
     const ids = Array.from({ length: nHidden }, (_, i) => `L${L}-${i}`);
     layers.push({ ids, labels: ids.map(() => ""), layerIndex: L }); // no numbers on heatmap
@@ -396,7 +387,7 @@ function drawNetwork(container: d3.Selection<any>) {
   const W0 = model._W[0] as number[][];
   for (let j = 0; j < nHidden; j++) {
     drawLink("t", `L0-${j}`, W0[j][0]);
-    drawLink("a", `L0-${j}`, W0[j][1]);
+    if (modelType === "bilo") drawLink("a", `L0-${j}`, W0[j][1]);
   }
   for (let L = 0; L < numHiddenLayers - 1; L++) {
     const Wk = model._W[L + 1] as number[][];
@@ -435,21 +426,20 @@ function drawNetwork(container: d3.Selection<any>) {
     });
   });
 
-  // Formula below output node
+  // Formula below output node: u = u₀ + t·N(t,a;W) or u = u₀ + t·N(t;W) for PINN
   const uPos = node2coord["u"];
   if (uPos) {
-    const u0Str = model.u0 === 1 ? "1" : String(model.u0);
-  g.append("text")
+    g.append("text")
       .attr("x", uPos.cx)
       .attr("y", uPos.cy + RECT_SIZE / 2 + 14)
       .attr("text-anchor", "middle")
       .attr("font-size", "11px")
       .attr("fill", "#333")
-      .text(modelType === "pinn" ? `u = ${u0Str} + t·N(t;W)` : `u = ${u0Str} + t·N(t,a;W)`);
+      .text(modelType === "pinn" ? "u = u₀ + t·N(t;W)" : "u = u₀ + t·N(t,a;W)");
   }
 
-  // Input nodes t and a: draw heatmap divs on top of SVG so they are visible
-  ["t", "a"].forEach((id) => {
+  // Input nodes t and a (a hidden for PINN): draw heatmap divs on top of SVG
+  (modelType === "pinn" ? ["t"] : ["t", "a"]).forEach((id) => {
     const pos = node2coord[id];
     if (!pos) return;
     const left = pos.cx - RECT_SIZE / 2;
@@ -477,7 +467,7 @@ function redrawLossChart() {
   const node = container.node() as HTMLElement;
   const w = node.offsetWidth || 400;
   const h = node.offsetHeight || 140;
-  const margin = { top: 8, right: 52, bottom: 22, left: 48 };
+  const margin = { top: 8, right: 72, bottom: 22, left: 48 };
   const width = w - margin.left - margin.right;
   const height = h - margin.top - margin.bottom;
 
@@ -485,10 +475,21 @@ function redrawLossChart() {
     .domain([Math.max(0, iter - LOSS_HISTORY_MAX), iter])
     .range([0, width]);
 
+  // Build series based on model and mode
+  const isPretrain = mode === "pretrain";
+  const series: { key: string; color: string; getVal: (d: LossPoint) => number }[] = [];
+  if (modelType === "bilo") {
+    series.push({ key: "L_res", color: "#f59322", getVal: d => d.L_res });
+    series.push({ key: "L_grad", color: "#0877bd", getVal: d => d.L_grad });
+    series.push({ key: "L_op", color: "#333", getVal: d => (d.L_op ?? wRes * d.L_res + wGrad * d.L_grad) });
+    if (!isPretrain) series.push({ key: "L_data", color: "#0a0", getVal: d => d.L_data });
+  } else {
+    series.push({ key: "L_res", color: "#f59322", getVal: d => d.L_res });
+    if (!isPretrain) series.push({ key: "L_data", color: "#0a0", getVal: d => d.L_data });
+  }
+
   const allVals: number[] = [];
-  lossHistory.forEach(d => {
-    allVals.push(d.L_res, d.L_grad, d.L_data, d.L_res + d.L_grad + d.L_data);
-  });
+  lossHistory.forEach(d => series.forEach(s => allVals.push(s.getVal(d))));
   const minV = Math.max(1e-8, d3.min(allVals)!);
   const maxV = d3.max(allVals)!;
   const yScale = d3.scale.log()
@@ -498,26 +499,16 @@ function redrawLossChart() {
   const svg = container.append("svg").attr("width", w).attr("height", h)
     .append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
-  const series = [
-    { key: "L_res", color: "#f59322" },
-    { key: "L_grad", color: "#0877bd" },
-    { key: "L_data", color: "#0a0" },
-    { key: "total", color: "#333" },
-  ] as const;
-
   series.forEach((s) => {
     const line = d3.svg.line<LossPoint>()
       .x(d => xScale(d.step))
-      .y(d => {
-        const v = s.key === "total" ? d.L_res + d.L_grad + d.L_data : (d as any)[s.key];
-        return yScale(Math.max(minV, v));
-      });
+      .y(d => yScale(Math.max(minV, s.getVal(d))));
     svg.append("path")
       .datum(lossHistory)
       .attr("fill", "none")
       .attr("stroke", s.color)
-      .attr("stroke-width", s.key === "total" ? 1.5 : 1)
-      .attr("stroke-dasharray", s.key === "total" ? "0" : "2,2")
+      .attr("stroke-width", s.key === "L_op" ? 1.5 : 1)
+      .attr("stroke-dasharray", s.key === "L_op" ? "0" : "2,2")
       .attr("d", line);
   });
 
@@ -535,19 +526,16 @@ function redrawLossChart() {
   svg.append("g").attr("class", "axis").attr("transform", "translate(0," + height + ")").call(xAxis);
   svg.append("g").attr("class", "axis y-axis").call(yAxis);
 
+  const legendLineH = 16;
   const legend = svg.append("g").attr("transform", "translate(" + (width + 2) + ",0)");
-  const subLabels: Record<string, string> = { L_res: "res", L_grad: "grad", L_data: "data" };
+  const subLabels: Record<string, string> = { L_res: "res", L_grad: "grad", L_data: "data", L_op: "op" };
   series.forEach((s, i) => {
-    legend.append("line").attr("x1", 0).attr("y1", i * 10).attr("x2", 8).attr("y2", i * 10)
-      .attr("stroke", s.color).attr("stroke-width", s.key === "total" ? 1.5 : 1);
-    const txt = legend.append("text").attr("x", 10).attr("y", i * 10 + 3).attr("font-size", "8px");
-    if (s.key === "total") {
-      txt.text("total");
-    } else {
-      const sub = subLabels[s.key] || s.key;
-      txt.append("tspan").text("L");
-      txt.append("tspan").attr("baseline-shift", "sub").attr("font-size", "6px").text(sub);
-    }
+    legend.append("line").attr("x1", 0).attr("y1", i * legendLineH).attr("x2", 10).attr("y2", i * legendLineH)
+      .attr("stroke", s.color).attr("stroke-width", s.key === "L_op" ? 1.5 : 1);
+    const txt = legend.append("text").attr("x", 14).attr("y", i * legendLineH + 4).attr("font-size", "12px");
+    const sub = subLabels[s.key] || s.key;
+    txt.append("tspan").text("L");
+    txt.append("tspan").attr("baseline-shift", "sub").attr("font-size", "10px").text(sub);
   });
 }
 
@@ -642,7 +630,7 @@ function redrawPlot() {
   plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 18).attr("x2", width + 28).attr("y2", legendY + 18)
     .attr("stroke", "#666").attr("stroke-width", 1.5);
   plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 22).attr("font-size", "11px")
-    .text("Analytical (a=" + aStr + ")");
+    .text("Exact (a=" + aStr + ")");
   plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 36).attr("x2", width + 28).attr("y2", legendY + 36)
     .attr("stroke", "#333").attr("stroke-width", 1.5).attr("stroke-dasharray", "4,2");
   plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 40).attr("font-size", "11px")
@@ -724,11 +712,14 @@ function syncOptionsFromUI() {
   }
   nPoints = Math.max(3, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
   nDataPoints = Math.max(2, Math.min(101, +(d3.select("#nDataPoints").node() as HTMLInputElement).value || 11));
-  wRes = +(d3.select("#wRes").node() as HTMLInputElement).value || 1;
-  wGrad = +(d3.select("#wGrad").node() as HTMLInputElement).value || 0.1;
-  wData = +(d3.select("#wData").node() as HTMLInputElement).value || 1.0;
+  const wResVal = parseFloat((d3.select("#wRes").node() as HTMLInputElement).value);
+  wRes = !isNaN(wResVal) && wResVal >= 0 ? wResVal : 1;
+  const wGradVal = parseFloat((d3.select("#wGrad").node() as HTMLInputElement).value);
+  wGrad = !isNaN(wGradVal) && wGradVal >= 0 ? wGradVal : 0.1;
+  const wDataVal = parseFloat((d3.select("#wData").node() as HTMLInputElement).value);
+  wData = !isNaN(wDataVal) && wDataVal >= 0 ? wDataVal : 1.0;
   mode = (d3.select("#mode").node() as HTMLSelectElement).value as "pretrain" | "finetune";
-  aParam = Math.max(0.1, Math.min(3, +(d3.select("#aParam").node() as HTMLInputElement).value || 1));
+  aParam = Math.max(0.1, Math.min(10, +(d3.select("#aParam").node() as HTMLInputElement).value || 1));
   if (mode === "finetune") a_learned = aParam; // sync from control when in finetune
   aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
   noiseLevel = Math.max(0, Math.min(0.5, +(d3.select("#noise").node() as HTMLInputElement).value || 0));
@@ -835,7 +826,7 @@ function init() {
   d3.select("#wData").on("change", () => syncOptionsFromUI());
   d3.select("#aParam").on("change", function() {
     const v = +(this as HTMLInputElement).value || 1;
-    aParam = Math.max(0.1, Math.min(3, v));
+    aParam = Math.max(0.1, Math.min(10, v));
     if (mode === "finetune") a_learned = aParam;
     a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
     redrawPlot();

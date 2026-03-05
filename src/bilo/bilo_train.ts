@@ -164,7 +164,7 @@ export function train(
   const history: TrainStep[] = [];
   for (let step = 0; step < n_iters; step++) {
     const { losses, grads } = model.computeLossesAndGradients(t_colloc, a_colloc, { w_res, w_grad, w_data: 0 });
-    const L_total = losses.L_res + losses.L_grad + losses.L_data;
+    const L_total = w_res * losses.L_res + w_grad * losses.L_grad;
 
     for (let k = 0; k < model.depth; k++) {
       const Wk = model._W[k];

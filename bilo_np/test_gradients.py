@@ -283,6 +283,98 @@ def test_combined_loss_gradients_match(ode_type: str, depth: int):
             assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol)
 
 
+# ---- Edge cases: zero weights ----
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+@pytest.mark.parametrize("depth", [2, 3])
+def test_bilo_w_res_zero_gradients_match(ode_type: str, depth: int):
+    """When w_res=0, w_grad=1, w_data=0: only L_grad contributes. Gradients should match PyTorch."""
+    np.random.seed(50)
+    np_model = BILOModel(n_hidden=4, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden=4, depth=depth, ode_type=ode_type)
+    sync_weights_np_to_torch(np_model, torch_model)
+
+    t_colloc = np.array([0.5])
+    a_colloc = np.array([1.0])
+
+    losses_np, grads_np = np_model.compute_losses_and_gradients(
+        t_colloc, a_colloc, w_res=0.0, w_grad=1.0, w_data=0.0
+    )
+
+    t = torch.tensor(t_colloc[0], dtype=torch.float64, requires_grad=True)
+    a = torch.tensor(a_colloc[0], dtype=torch.float64, requires_grad=True)
+    N, u, u_t, u_a, u_ta, R, R_a = torch_model(t, a)
+    L_grad = 0.5 * R_a * R_a
+    L_grad.backward()
+
+    rtol, atol = 1e-5, 1e-8
+    for k in range(depth):
+        assert np.allclose(
+            grads_np[f"W{k+1}"], torch_model._W[k].grad.numpy(), rtol=rtol, atol=atol
+        ), f"W{k+1} grad mismatch w_res=0 depth={depth}"
+        bn = grads_np[f"b{k+1}"]
+        gb = torch_model._b[k].grad
+        if np.ndim(bn) == 0:
+            assert np.isclose(bn, gb.item(), rtol=rtol, atol=atol)
+        else:
+            assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol)
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+@pytest.mark.parametrize("depth", [2, 3])
+def test_bilo_w_grad_zero_gradients_match(ode_type: str, depth: int):
+    """When w_res=1, w_grad=0, w_data=0: only L_res contributes. Gradients should match PyTorch."""
+    np.random.seed(51)
+    np_model = BILOModel(n_hidden=4, depth=depth, ode_type=ode_type)
+    torch_model = BILOModelTorch(n_hidden=4, depth=depth, ode_type=ode_type)
+    sync_weights_np_to_torch(np_model, torch_model)
+
+    t_colloc = np.array([0.5])
+    a_colloc = np.array([1.0])
+
+    losses_np, grads_np = np_model.compute_losses_and_gradients(
+        t_colloc, a_colloc, w_res=1.0, w_grad=0.0, w_data=0.0
+    )
+
+    t = torch.tensor(t_colloc[0], dtype=torch.float64, requires_grad=True)
+    a = torch.tensor(a_colloc[0], dtype=torch.float64, requires_grad=True)
+    N, u, u_t, u_a, u_ta, R, R_a = torch_model(t, a)
+    L_res = 0.5 * R * R
+    L_res.backward()
+
+    rtol, atol = 1e-5, 1e-8
+    for k in range(depth):
+        assert np.allclose(
+            grads_np[f"W{k+1}"], torch_model._W[k].grad.numpy(), rtol=rtol, atol=atol
+        ), f"W{k+1} grad mismatch w_grad=0 depth={depth}"
+        bn = grads_np[f"b{k+1}"]
+        gb = torch_model._b[k].grad
+        if np.ndim(bn) == 0:
+            assert np.isclose(bn, gb.item(), rtol=rtol, atol=atol)
+        else:
+            assert np.allclose(bn, gb.numpy(), rtol=rtol, atol=atol)
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+def test_bilo_all_weights_zero_no_update(ode_type: str):
+    """When w_res=0, w_grad=0, w_data=0, all gradients should be zero."""
+    np.random.seed(52)
+    np_model = BILOModel(n_hidden=4, depth=2, ode_type=ode_type)
+
+    t_colloc = np.array([0.5])
+    a_colloc = np.array([1.0])
+
+    _, grads_np = np_model.compute_losses_and_gradients(
+        t_colloc, a_colloc, w_res=0.0, w_grad=0.0, w_data=0.0
+    )
+    for k in range(np_model.depth):
+        assert np.allclose(grads_np[f"W{k+1}"], 0.0, atol=1e-14), f"W{k+1} grad must be 0"
+        assert np.allclose(np.atleast_1d(grads_np[f"b{k+1}"]), 0.0, atol=1e-14), f"b{k+1} grad must be 0"
+
+
 # ---- ADAM: NumPy vs PyTorch (few steps, loose tol for numerical differences) ----
 
 @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")

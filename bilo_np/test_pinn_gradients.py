@@ -269,3 +269,45 @@ def test_pinn_combined_loss_gradients_match(ode_type: str, depth: int):
     assert np.isclose(
         grads_np["a"], torch_model.a.grad.item(), rtol=rtol, atol=atol
     ), "dL/da mismatch"
+
+
+# ---- Edge cases: zero weights ----
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+def test_pinn_w_res_zero_grad_a_zero(ode_type: str):
+    """When w_res=0, gradient of a must be 0 (L_data does not depend on a)."""
+    np.random.seed(46)
+    np_model = PINNModel(n_hidden=4, depth=2, ode_type=ode_type)
+
+    t_colloc = np.array([0.25, 0.5, 0.75])
+    a_colloc = np.array([1.0, 1.0, 1.0])
+    t_data = np.array([0.5])
+    u_data = np.array([1.65])
+
+    _, grads_np = np_model.compute_losses_and_gradients_pinn(
+        t_colloc, a_colloc,
+        t_data=t_data, u_data=u_data,
+        w_res=0.0, w_data=1.0,
+    )
+    assert "a" in grads_np
+    assert np.isclose(grads_np["a"], 0.0, atol=1e-14), "grads['a'] must be 0 when w_res=0"
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
+@pytest.mark.parametrize("ode_type", ["exponential", "logistic"])
+def test_pinn_both_weights_zero_no_update(ode_type: str):
+    """When w_res=0 and w_data=0, all gradients should be zero."""
+    np.random.seed(47)
+    np_model = PINNModel(n_hidden=4, depth=2, ode_type=ode_type)
+
+    t_colloc = np.array([0.5])
+    a_colloc = np.array([1.0])
+
+    _, grads_np = np_model.compute_losses_and_gradients_pinn(
+        t_colloc, a_colloc, w_res=0.0, w_data=0.0
+    )
+    for k in range(np_model.depth):
+        assert np.allclose(grads_np[f"W{k+1}"], 0.0, atol=1e-14), f"W{k+1} grad must be 0"
+        assert np.allclose(np.atleast_1d(grads_np[f"b{k+1}"]), 0.0, atol=1e-14), f"b{k+1} grad must be 0"
+    assert np.isclose(grads_np["a"], 0.0, atol=1e-14), "grads['a'] must be 0"

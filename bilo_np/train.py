@@ -117,7 +117,7 @@ def train_finetune(
         L_res = losses["L_res"]
         L_grad = losses["L_grad"]
         L_data = losses["L_data"]
-        L_total = L_res + L_grad + L_data
+        L_total = w_res * L_res + w_grad * L_grad + w_data * L_data
 
         step1 = step + 1
         if optimizer == "adam":
@@ -198,7 +198,7 @@ def train(
         L_res = losses["L_res"]
         L_grad = losses["L_grad"]
         L_data = losses["L_data"]
-        L_total = L_res + L_grad + L_data
+        L_total = w_res * L_res + w_grad * L_grad + w_data * L_data
 
         step1 = step + 1
         if optimizer == "adam":
@@ -265,7 +265,7 @@ def train_pinn(
         )
         L_res = losses["L_res"]
         L_data = losses["L_data"]
-        L_total = L_res + L_data
+        L_total = w_res * L_res + w_data * L_data
 
         for k in range(model.depth):
             model._W[k] -= lr * grads[f"W{k+1}"]

@@ -491,7 +491,8 @@ class PINNModel(BILOModel):
         for k in range(self.depth):
             grads[f"W{k+1}"] = grad_W_acc[k]
             grads[f"b{k+1}"] = grad_b_acc[k]
-        grads["a"] = dL_res_da
+        # dL_total/da = w_res * dL_res/da (L_data does not depend on a)
+        grads["a"] = w_res * dL_res_da
         return losses, grads
 
     def eval_u(self, t: np.ndarray | float, a: np.ndarray | float = 0.0) -> np.ndarray | float:

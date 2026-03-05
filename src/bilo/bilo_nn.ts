@@ -638,7 +638,8 @@ export class PINNModel extends BILOModel {
       grads[`W${k + 1}`] = grad_W_acc[k] as number[] | number[][];
       grads[`b${k + 1}`] = grad_b_acc[k] as number[] | number;
     }
-    grads.a = dL_res_da;
+    // dL_total/da = w_res * dL_res/da (L_data does not depend on a)
+    grads.a = w_res * dL_res_da;
 
     return {
       losses: { L_res, L_grad: 0, L_data },

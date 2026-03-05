@@ -1,5 +1,26 @@
 /* BILO page: match original TF Playground layout and sizing */
 
+#bilo-page header {
+  background-color: #CBBD93;
+}
+
+#bilo-page .bilo-network-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+#bilo-page .bilo-network-header h4 {
+  margin: 0;
+}
+
+#bilo-page .bilo-network-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 #bilo-page #top-controls .container {
   display: flex;
   flex-wrap: wrap;

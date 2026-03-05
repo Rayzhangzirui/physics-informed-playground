@@ -11,7 +11,7 @@
 </head>
 <body id="bilo-page">
   <header>
-    <h1 class="l--page">BILO Playground — PDE <b>u' = a·u</b></h1>
+    <h1 class="l--page">BILO Playground — PDE <b id="pde-title">u' = a·u</b></h1>
   </header>
 
   <div id="top-controls">
@@ -33,11 +33,33 @@
         <span class="value" id="iter-number">0</span>
       </div>
       <div class="control">
+        <label for="odeType">ODE</label>
+        <div class="select">
+          <select id="odeType">
+            <option value="exponential">u' = a·u (exponential)</option>
+            <option value="logistic">u' = a·u·(1−u) (logistic)</option>
+          </select>
+        </div>
+      </div>
+      <div class="control">
+        <label for="u0">Initial condition u(0)</label>
+        <input type="number" id="u0" min="0.01" max="2" step="0.01" value="1" class="control-input" title="u(0); default 1 (exponential) or 0.1 (logistic)">
+      </div>
+      <div class="control">
         <label for="modelType">Model</label>
         <div class="select">
           <select id="modelType">
             <option value="bilo">BILO</option>
             <option value="pinn">PINN</option>
+          </select>
+        </div>
+      </div>
+      <div class="control">
+        <label for="optimizer">Optimizer</label>
+        <div class="select">
+          <select id="optimizer">
+            <option value="sgd">SGD</option>
+            <option value="adam">Adam</option>
           </select>
         </div>
       </div>

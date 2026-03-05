@@ -3,7 +3,16 @@
  */
 
 import * as d3 from "d3";
-import { BILOModel, PINNModel, runBiloTests, runPinnTests } from "./bilo";
+import {
+  BILOModel,
+  PINNModel,
+  runBiloTests,
+  runPinnTests,
+  adamStepModel,
+  adamStepA,
+  type OdeType,
+  type AdamState,
+} from "./bilo";
 
 const RECT_SIZE = 32;
 const NETWORK_HEIGHT_MIN = 400;
@@ -32,9 +41,13 @@ let wData = 1.0;
 let aParam = 1;      // network input a (pretrain fixed, finetune initial)
 let aParamGT = 2;    // ground-truth a for generating training data (dashed line)
 let noiseLevel = 0; // uniform noise added to training data: u += U(-noise, +noise)
+let odeType: OdeType = "exponential";
+let u0: number = 1;
+let optimizer: "sgd" | "adam" = "sgd";
 let modelType: "bilo" | "pinn" = "bilo";
 let mode: "pretrain" | "finetune" = "pretrain";
 let a_learned = 1;   // only used in finetune
+let adamState: AdamState = { m_W: [], v_W: [], m_b: [], v_b: [] };
 
 let t_colloc: number[];
 let a_colloc: number[];
@@ -64,20 +77,29 @@ function getDataPointsGrid(): number[] {
 
 function buildModel() {
   if (modelType === "pinn") {
-    model = new PINNModel(nHidden, depthOption, 42);
+    model = new PINNModel(nHidden, depthOption, 42, odeType, u0);
   } else {
-    model = new BILOModel(nHidden, depthOption, 42);
+    model = new BILOModel(nHidden, depthOption, 42, odeType, u0);
   }
   t_colloc = getResidualPoints();
   a_learned = aParam;
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
 }
 
-/** Training data for L_data only; uses nDataPoints (can differ from residual nPoints). */
+/** Analytical logistic solution: u(t) = u0*e^{at} / (1 + u0*(e^{at}-1)). */
+function logisticSolution(t: number, a: number, u0Val: number): number {
+  const eat = Math.exp(a * t);
+  return (u0Val * eat) / (1 + u0Val * (eat - 1));
+}
+
+/** Training data for L_data only; uses nDataPoints. Respects odeType and u0. */
 function generateTrainingData(): { t_data: number[]; u_data: number[] } {
   const t_data = getDataPointsGrid();
   const u_data = t_data.map(t => {
-    const u = Math.exp(aParamGT * t);
+    const u =
+      odeType === "exponential"
+        ? u0 * Math.exp(aParamGT * t)
+        : logisticSolution(t, aParamGT, u0);
     const noise = (2 * Math.random() - 1) * noiseLevel;
     return u + noise;
   });
@@ -128,27 +150,35 @@ function oneStep() {
     grads = out.grads;
   }
 
-  const lrScaled = lr;
-  for (let k = 0; k < model.depth; k++) {
-    const Wk = model._W[k];
-    const gWk = grads[`W${k + 1}`];
-    if (Array.isArray(Wk[0])) {
-      const W = Wk as number[][];
-      const g = gWk as number[][];
-      for (let i = 0; i < W.length; i++) for (let j = 0; j < W[i].length; j++) W[i][j] -= lrScaled * g[i][j];
-    } else {
-      const W = Wk as number[];
-      const g = gWk as number[];
-      for (let i = 0; i < W.length; i++) W[i] -= lrScaled * g[i];
+  const step1 = iter + 1;
+  if (optimizer === "adam") {
+    adamStepModel(model as BILOModel, grads, adamState, step1, lr);
+    if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
+      a_learned = adamStepA(a_learned, grads.a, adamState, step1, lrA);
+      a_learned = Math.max(0.1, Math.min(3, a_learned));
     }
-    const bk = model._b[k];
-    const gbk = grads[`b${k + 1}`];
-    if (typeof bk === "number") (model._b[k] as number) = bk - lrScaled * (gbk as number);
-    else for (let i = 0; i < (bk as number[]).length; i++) (bk as number[])[i] -= lrScaled * (gbk as number[])[i];
-  }
-
-  if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
-    a_learned = Math.max(0.1, Math.min(3, a_learned - lrA * grads.a));
+  } else {
+    const lrScaled = lr;
+    for (let k = 0; k < model.depth; k++) {
+      const Wk = model._W[k];
+      const gWk = grads[`W${k + 1}`];
+      if (Array.isArray(Wk[0])) {
+        const W = Wk as number[][];
+        const g = gWk as number[][];
+        for (let i = 0; i < W.length; i++) for (let j = 0; j < W[i].length; j++) W[i][j] -= lrScaled * g[i][j];
+      } else {
+        const W = Wk as number[];
+        const g = gWk as number[];
+        for (let i = 0; i < W.length; i++) W[i] -= lrScaled * g[i];
+      }
+      const bk = model._b[k];
+      const gbk = grads[`b${k + 1}`];
+      if (typeof bk === "number") (model._b[k] as number) = bk - lrScaled * (gbk as number);
+      else for (let i = 0; i < (bk as number[]).length; i++) (bk as number[])[i] -= lrScaled * (gbk as number[])[i];
+    }
+    if (mode === "finetune" && grads.a != null && typeof grads.a === "number") {
+      a_learned = Math.max(0.1, Math.min(3, a_learned - lrA * grads.a));
+    }
   }
 
   iter++;
@@ -408,13 +438,14 @@ function drawNetwork(container: d3.Selection<any>) {
   // Formula below output node
   const uPos = node2coord["u"];
   if (uPos) {
-    g.append("text")
+    const u0Str = model.u0 === 1 ? "1" : String(model.u0);
+  g.append("text")
       .attr("x", uPos.cx)
       .attr("y", uPos.cy + RECT_SIZE / 2 + 14)
       .attr("text-anchor", "middle")
       .attr("font-size", "11px")
       .attr("fill", "#333")
-      .text(modelType === "pinn" ? "u = 1 + t·N(t;W)" : "u = 1 + t·N(t,a;W)");
+      .text(modelType === "pinn" ? `u = ${u0Str} + t·N(t;W)` : `u = ${u0Str} + t·N(t,a;W)`);
   }
 
   // Input nodes t and a: draw heatmap divs on top of SVG so they are visible
@@ -539,8 +570,12 @@ function redrawPlot() {
   const aDisplay = mode === "pretrain" ? aParam : a_learned;
   const tPlot = Array.from({ length: N_PLOT }, (_, i) => 0 + (T_PLOT_MAX - 0) * i / (N_PLOT - 1));
   const uPred = model.evalUArray(tPlot, aDisplay);  // PINNModel.evalU ignores second arg
-  const uExactGT = tPlot.map(t => Math.exp(aParamGT * t)); // ground truth (data-generating a)
-  const uAnalyticalCurrent = tPlot.map(t => Math.exp(aDisplay * t)); // analytical for current a
+  const uExactGT = tPlot.map(t =>
+    odeType === "exponential" ? u0 * Math.exp(aParamGT * t) : logisticSolution(t, aParamGT, u0)
+  );
+  const uAnalyticalCurrent = tPlot.map(t =>
+    odeType === "exponential" ? u0 * Math.exp(aDisplay * t) : logisticSolution(t, aDisplay, u0)
+  );
 
   let yMax = Math.max(d3.max(uPred)!, d3.max(uExactGT)!, d3.max(uAnalyticalCurrent)!);
   if (trainingData && trainingData.u_data.length > 0) {
@@ -636,6 +671,7 @@ function updateUI() {
 function reset() {
   iter = 0;
   a_learned = aParam;
+  adamState = { m_W: [], v_W: [], m_b: [], v_b: [] };
   buildModel();
   trainingData = mode === "finetune" ? generateTrainingData() : null;
   resetLossChart();
@@ -670,6 +706,9 @@ function pause() {
 }
 
 function syncOptionsFromUI() {
+  odeType = (d3.select("#odeType").node() as HTMLSelectElement).value as OdeType;
+  u0 = Math.max(0.01, Math.min(2, +(d3.select("#u0").node() as HTMLInputElement).value || 1));
+  optimizer = (d3.select("#optimizer").node() as HTMLSelectElement).value as "sgd" | "adam";
   modelType = (d3.select("#modelType").node() as HTMLSelectElement).value as "bilo" | "pinn";
   lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.001;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
@@ -715,6 +754,34 @@ function init() {
   d3.select("#learningRate").on("change", function() { syncOptionsFromUI(); });
   d3.select("#lrA").on("change", function() { syncOptionsFromUI(); });
 
+  const pdeTitle = document.getElementById("pde-title");
+  if (pdeTitle) {
+    const setPdeTitle = () => {
+      pdeTitle.textContent = odeType === "exponential" ? "u' = a·u" : "u' = a·u·(1−u)";
+    };
+    setPdeTitle();
+  }
+
+  d3.select("#odeType").on("change", function() {
+    const val = (this as HTMLSelectElement).value as OdeType;
+    odeType = val;
+    const u0Input = document.getElementById("u0") as HTMLInputElement;
+    if (u0Input) u0Input.value = val === "logistic" ? "0.1" : "1";
+    syncOptionsFromUI();
+    const pt = document.getElementById("pde-title");
+    if (pt) pt.textContent = odeType === "exponential" ? "u' = a·u" : "u' = a·u·(1−u)";
+    pause();
+    reset();
+  });
+  d3.select("#u0").on("change", function() {
+    syncOptionsFromUI();
+    pause();
+    reset();
+  });
+  d3.select("#optimizer").on("change", function() {
+    syncOptionsFromUI();
+    adamState = { m_W: [], v_W: [], m_b: [], v_b: [] };
+  });
   d3.select("#modelType").on("change", function() {
     syncOptionsFromUI();
     pause();

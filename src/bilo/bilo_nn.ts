@@ -1,8 +1,14 @@
 /**
- * BILO model: manual backprop for PDE u' = a*u
- * General d-layer: input [t, a] -> hidden 1 .. hidden d-1 (tanh) -> N -> u = 1 + t*N
+ * BILO model: manual backprop for PDEs
+ * - Exponential: u' = a*u, u(0)=u0. Trial u = u0 + t*N.
+ * - Logistic: u' = a*u*(1-u), u(0)=u0. Trial u = u0 + t*N.
+ * General d-layer: input [t, a] -> hidden 1 .. hidden d-1 (tanh) -> N -> u = u0 + t*N
  * Same recurrence and backward as playground/bilo_np/model.py
  */
+
+export type OdeType = "exponential" | "logistic";
+
+const U0_LOGISTIC_DEFAULT = 0.1;
 
 function mulberry32(seed: number): () => number {
   return () => {
@@ -87,15 +93,25 @@ export type WeightMatrix = number[][] | number[];
 export class BILOModel {
   n_hidden: number;
   depth: number;
+  ode_type: OdeType;
+  u0: number;
   /** W[0]: (n x 2), W[1]..W[depth-2]: (n x n), W[depth-1]: (n,) output row */
   _W: WeightMatrix[];
   /** b[0]..b[depth-2]: (n,), b[depth-1]: scalar */
   _b: (number[] | number)[];
 
-  constructor(n_hidden: number, depth: number = 2, seed?: number) {
+  constructor(
+    n_hidden: number,
+    depth: number = 2,
+    seed?: number,
+    ode_type: OdeType = "exponential",
+    u0?: number
+  ) {
     if (depth < 2) throw new Error("depth must be >= 2");
     this.n_hidden = n_hidden;
     this.depth = depth;
+    this.ode_type = ode_type;
+    this.u0 = u0 !== undefined ? u0 : (ode_type === "exponential" ? 1 : U0_LOGISTIC_DEFAULT);
     const n = n_hidden;
     const d = depth;
     const raw = seed !== undefined ? mulberry32(seed) : () => Math.random();
@@ -222,7 +238,7 @@ export class BILOModel {
     sigma_list: { sigma: number[]; sigma_p: number[]; sigma_pp: number[]; sigma_ppp: number[] }[];
   } {
     const f = this.forwardAndKinematics(t, a);
-    const u = 1 + t * f.N;
+    const u = this.u0 + t * f.N;
     const u_t = f.N + t * f.N_t;
     const u_a = t * f.N_a;
     const u_ta = f.N_a + t * f.N_ta;
@@ -308,10 +324,27 @@ export class BILOModel {
     w_grad: number
   ): { grad_W: WeightMatrix[]; grad_b: (number[] | number)[] } {
     const f = this.forwardAndKinematics(t, a);
-    const delta_N = w_res * R * (1 - a * t) - w_grad * R_a * t + delta_N_data;
-    const delta_N_t = w_res * R * t;
-    const delta_N_a = w_grad * R_a * (1 - a * t);
-    const delta_N_ta = w_grad * R_a * t;
+    const u = this.u0 + t * f.N;
+    let delta_N: number;
+    let delta_N_t: number;
+    let delta_N_a: number;
+    let delta_N_ta: number;
+    if (this.ode_type === "exponential") {
+      delta_N = w_res * R * (1 - a * t) - w_grad * R_a * t + delta_N_data;
+      delta_N_t = w_res * R * t;
+      delta_N_a = w_grad * R_a * (1 - a * t);
+      delta_N_ta = w_grad * R_a * t;
+    } else {
+      const u_a = t * f.N_a;
+      const one_minus_2u = 1 - 2 * u;
+      delta_N =
+        w_res * R * (1 - a * t * one_minus_2u) +
+        w_grad * R_a * t * (-one_minus_2u + 2 * a * u_a) +
+        delta_N_data;
+      delta_N_t = w_res * R * t;
+      delta_N_a = w_grad * R_a * (1 - a * t * one_minus_2u);
+      delta_N_ta = w_grad * R_a * t;
+    }
 
     const W_d = this._W[this.depth - 1] as number[];
     let delta_h = W_d.map(w => delta_N * w);
@@ -399,8 +432,15 @@ export class BILOModel {
       const t = t_colloc[i],
         a = a_colloc[i];
       const f = this.forward(t, a);
-      const R = f.u_t - a * f.u;
-      const R_a = f.u_ta - (f.u + a * f.u_a);
+      let R: number;
+      let R_a: number;
+      if (this.ode_type === "exponential") {
+        R = f.u_t - a * f.u;
+        R_a = f.u_ta - (f.u + a * f.u_a);
+      } else {
+        R = f.u_t - a * f.u * (1 - f.u);
+        R_a = f.u_ta - f.u * (1 - f.u) - a * f.u_a * (1 - 2 * f.u);
+      }
       L_res += 0.5 * R * R;
       L_grad += 0.5 * R_a * R_a;
 
@@ -498,8 +538,14 @@ export class BILOModel {
 // -----------------------------------------------------------------------------
 
 export class PINNModel extends BILOModel {
-  constructor(n_hidden: number, depth: number = 2, seed?: number) {
-    super(n_hidden, depth, seed);
+  constructor(
+    n_hidden: number,
+    depth: number = 2,
+    seed?: number,
+    ode_type: OdeType = "exponential",
+    u0?: number
+  ) {
+    super(n_hidden, depth, seed, ode_type, u0);
     const W1 = this._W[0] as number[][];
     for (let i = 0; i < W1.length; i++) W1[i][1] = 0;
   }
@@ -535,9 +581,12 @@ export class PINNModel extends BILOModel {
     for (let i = 0; i < t_colloc.length; i++) {
       const t = t_colloc[i], a = a_colloc[i];
       const f = this.forward(t, a);
-      const R = f.u_t - a * f.u;
+      const R =
+        this.ode_type === "exponential"
+          ? f.u_t - a * f.u
+          : f.u_t - a * f.u * (1 - f.u);
       L_res += 0.5 * R * R;
-      dL_res_da += -R * f.u;
+      dL_res_da += this.ode_type === "exponential" ? -R * f.u : -R * f.u * (1 - f.u);
 
       const { grad_W, grad_b } = this.backwardOnePoint(t, a, R, 0, 0, w_res, 0);
       for (let k = 0; k < this.depth; k++) {

@@ -128,7 +128,11 @@ def _run_verification_bilo(snap: dict, _W: list, _b: list, np_model: BILOModel, 
         messages.append("SKIP: PyTorch not installed, only TS vs NumPy comparison done")
         return loss_ok, grad_ok
 
-    torch_model = BILOModelTorch(n_hidden=n_hidden, depth=depth, seed=snap["seed"])
+    ode_type = snap.get("ode_type", "exponential")
+    u0 = snap.get("u0")
+    torch_model = BILOModelTorch(
+        n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, seed=snap["seed"]
+    )
     with torch.no_grad():
         for k in range(depth):
             torch_model._W[k].copy_(torch.from_numpy(np_model._W[k]))
@@ -241,8 +245,17 @@ def _run_verification_pinn(snap: dict, _W: list, _b: list, np_model: PINNModel, 
         messages.append("SKIP: PyTorch not installed, only TS vs NumPy comparison done")
         return loss_ok, grad_ok
 
-    a_val = float(a_colloc[0])
-    torch_model = PINNModelTorch(n_hidden=n_hidden, depth=depth, seed=snap["seed"], a_init=a_val)
+    ode_type = snap.get("ode_type", "exponential")
+    u0 = snap.get("u0")
+    a_val = float(a_colloc[0]) if len(a_colloc) > 0 else 1.0
+    torch_model = PINNModelTorch(
+        n_hidden=n_hidden,
+        depth=depth,
+        ode_type=ode_type,
+        u0=u0,
+        seed=snap["seed"],
+        a_init=a_val,
+    )
     with torch.no_grad():
         for k in range(depth):
             torch_model._W[k].copy_(torch.from_numpy(np_model._W[k]))
@@ -307,12 +320,19 @@ def run_verification(snapshot_path: str | Path) -> tuple[bool, list[str]]:
     model_type = snap.get("model_type", "bilo")
     n_hidden = snap["n_hidden"]
     depth = snap["depth"]
+    ode_type = snap.get("ode_type", "exponential")
+    u0 = snap.get("u0")
     _W, _b = snapshot_to_numpy_weights(snap)
 
+    rng = np.random.default_rng(snap["seed"])
     if model_type == "pinn":
-        np_model = PINNModel(n_hidden=n_hidden, depth=depth, rng=np.random.default_rng(snap["seed"]))
+        np_model = PINNModel(
+            n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, rng=rng
+        )
     else:
-        np_model = BILOModel(n_hidden=n_hidden, depth=depth, rng=np.random.default_rng(snap["seed"]))
+        np_model = BILOModel(
+            n_hidden=n_hidden, depth=depth, ode_type=ode_type, u0=u0, rng=rng
+        )
 
     for k in range(depth):
         np_model._W[k] = _W[k].copy()

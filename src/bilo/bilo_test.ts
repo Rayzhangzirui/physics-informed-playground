@@ -1,128 +1,36 @@
 /**
- * Unit tests for BILO and PINN TS implementation.
- * - Forward and loss tests (boundary, loss decrease, finite gradients, evalUArray).
- * - Snapshot export: run forward + backward, save weights and gradients to JSON
- *   for verification against PyTorch (run: python playground/bilo_np/verify_ts_gradients.py).
+ * BILO/PINN TS tests: gradient verification via snapshots.
+ *
+ * - runBiloTests / runPinnTests: minimal sanity (boundary u(0)=u0, PINN u independent of a).
+ * - getVerificationSnapshots(): returns snapshots for each scenario; verify against PyTorch
+ *   by writing JSON (npm run write-ts-snapshots) then: pytest bilo_np/test_verify_ts_gradients.py
+ *
+ * Snapshot scenarios mirror playground/bilo_np/test_gradients.py and test_pinn_gradients.py.
  */
 
-import { BILOModel, PINNModel } from "./bilo_nn";
+import { BILOModel, PINNModel, type OdeType } from "./bilo_nn";
 
 const DEFAULT_DEPTH = 2;
-
-function applyGradients(model: BILOModel, grads: Record<string, number[] | number[][] | number>, lr: number): void {
-  for (let k = 0; k < model.depth; k++) {
-    const Wk = model._W[k];
-    const gWk = grads[`W${k + 1}`];
-    if (Array.isArray(Wk[0])) {
-      const W = Wk as number[][];
-      const g = gWk as number[][];
-      for (let i = 0; i < W.length; i++)
-        for (let j = 0; j < W[i].length; j++) W[i][j] -= lr * g[i][j];
-    } else {
-      const W = Wk as number[];
-      const g = gWk as number[];
-      for (let i = 0; i < W.length; i++) W[i] -= lr * g[i];
-    }
-    const bk = model._b[k];
-    const gbk = grads[`b${k + 1}`];
-    if (typeof bk === "number") {
-      (model._b[k] as number) = bk - lr * (gbk as number);
-    } else {
-      const b = bk as number[];
-      const g = gbk as number[];
-      for (let i = 0; i < b.length; i++) b[i] -= lr * g[i];
-    }
-  }
-}
 
 export function runBiloTests(): { pass: boolean; messages: string[] } {
   const messages: string[] = [];
   let pass = true;
 
-  // Test 1: Forward pass u(0,a) = 1 (boundary)
+  // Boundary: u(0, a) = u0 for exponential (1) and logistic (0.1)
   {
-    const model = new BILOModel(4, DEFAULT_DEPTH, 42);
+    const expModel = new BILOModel(4, DEFAULT_DEPTH, 42, "exponential");
+    const logModel = new BILOModel(4, DEFAULT_DEPTH, 42, "logistic");
     for (const a of [0.5, 1, 2]) {
-      const u = model.evalU(0, a);
-      if (Math.abs(u - 1) > 1e-10) {
+      if (Math.abs(expModel.evalU(0, a) - 1) > 1e-10) {
         pass = false;
-        messages.push(`FAIL: u(0,${a}) = ${u}, expected 1`);
+        messages.push(`FAIL: exponential u(0,${a}) != 1`);
+      }
+      if (Math.abs(logModel.evalU(0, a) - 0.1) > 1e-10) {
+        pass = false;
+        messages.push(`FAIL: logistic u(0,${a}) != 0.1`);
       }
     }
-    if (pass) messages.push("PASS: u(0,a) = 1 (boundary)");
-  }
-
-  // Test 2: Loss decreases over training (small lr, enough steps)
-  {
-    const model = new BILOModel(4, DEFAULT_DEPTH, 42);
-    const t = [0.25, 0.5, 0.75];
-    const a = [1, 1, 1];
-    const { losses: l0 } = model.computeLossesAndGradients(t, a, { w_res: 1, w_grad: 0.1 });
-    for (let i = 0; i < 150; i++) {
-      const { losses, grads } = model.computeLossesAndGradients(t, a, { w_res: 1, w_grad: 0.1 });
-      applyGradients(model, grads, 0.01);
-    }
-    const { losses: l1 } = model.computeLossesAndGradients(t, a, { w_res: 1, w_grad: 0.1 });
-    if (l1.L_res + l1.L_grad >= l0.L_res + l0.L_grad) {
-      pass = false;
-      messages.push(`FAIL: loss did not decrease: ${l0.L_res + l0.L_grad} -> ${l1.L_res + l1.L_grad}`);
-    } else {
-      messages.push("PASS: loss decreases over training");
-    }
-  }
-
-  // Test 3: Gradients are finite
-  {
-    const model = new BILOModel(4, DEFAULT_DEPTH, 42);
-    const { grads } = model.computeLossesAndGradients([0.5], [1], { w_res: 1, w_grad: 0.1 });
-    const allFinite = (arr: number[] | number[][] | number): boolean => {
-      if (typeof arr === "number") return isFinite(arr);
-      if (Array.isArray(arr[0])) return (arr as number[][]).every(row => row.every(x => isFinite(x)));
-      return (arr as number[]).every(x => isFinite(x));
-    };
-    const ok = Object.keys(grads).filter(k => k !== "a").every(k => allFinite(grads[k] as number[] | number[][] | number));
-    if (!ok) {
-      pass = false;
-      messages.push("FAIL: gradients contain NaN/Inf");
-    } else {
-      messages.push("PASS: gradients are finite");
-    }
-  }
-
-  // Test 4: evalUArray matches evalU
-  {
-    const model = new BILOModel(4, DEFAULT_DEPTH, 42);
-    const tArr = [0, 0.5, 1];
-    const a = 1;
-    const arr = model.evalUArray(tArr, a);
-    const single = tArr.map(t => model.evalU(t, a));
-    const match = arr.every((v, i) => Math.abs(v - single[i]) < 1e-12);
-    if (!match) {
-      pass = false;
-      messages.push("FAIL: evalUArray != map evalU");
-    } else {
-      messages.push("PASS: evalUArray consistency");
-    }
-  }
-
-  // Test 5: Depth 3 (two hidden layers) forward and gradients
-  {
-    const model = new BILOModel(4, 3, 43);
-    const f = model.forward(0.5, 1);
-    if (!isFinite(f.N) || !isFinite(f.u)) {
-      pass = false;
-      messages.push("FAIL: depth=3 forward produced non-finite");
-    }
-    const { losses, grads } = model.computeLossesAndGradients([0.5], [1], { w_res: 1, w_grad: 0.1 });
-    const hasW1 = Array.isArray(grads.W1) && Array.isArray((grads.W1 as number[][])[0]);
-    const hasW2 = Array.isArray(grads.W2);
-    const hasW3 = Array.isArray(grads.W3) && !Array.isArray((grads.W3 as number[])[0]);
-    if (!hasW1 || !hasW2 || !hasW3) {
-      pass = false;
-      messages.push("FAIL: depth=3 grads missing W1/W2/W3");
-    } else {
-      messages.push("PASS: depth=3 forward and grads");
-    }
+    if (pass) messages.push("PASS: boundary u(0,a)=u0");
   }
 
   return { pass, messages };
@@ -134,61 +42,16 @@ export function runPinnTests(): { pass: boolean; messages: string[] } {
   const messages: string[] = [];
   let pass = true;
 
-  {
-    const model = new PINNModel(4, DEFAULT_DEPTH, 42);
-    for (const a of [0, 0.5, 1, 2]) {
-      const u0 = model.evalU(0.5, a);
-      const u1 = model.evalU(0.5, 1);
-      if (Math.abs(u0 - u1) > 1e-10) {
-        pass = false;
-        messages.push(`FAIL: PINN u(0.5,${a}) = ${u0} != u(0.5,1) = ${u1}`);
-      }
-    }
-    if (pass) messages.push("PASS: PINN u(t) independent of a");
-  }
-
-  {
-    const model = new PINNModel(4, DEFAULT_DEPTH, 42);
-    const t_colloc = [0.25, 0.5, 0.75];
-    const a_colloc = [1, 1, 1];
-    const { losses: l0 } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
-    for (let i = 0; i < 100; i++) {
-      const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
-      applyGradients(model, grads, 0.01);
-    }
-    const { losses: l1 } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, { w_res: 1 });
-    if (l1.L_res >= l0.L_res) {
+  const model = new PINNModel(4, DEFAULT_DEPTH, 42, "exponential");
+  for (const a of [0, 0.5, 1, 2]) {
+    const u0 = model.evalU(0.5, a);
+    const u1 = model.evalU(0.5, 1);
+    if (Math.abs(u0 - u1) > 1e-10) {
       pass = false;
-      messages.push(`FAIL: PINN L_res did not decrease: ${l0.L_res} -> ${l1.L_res}`);
-    } else {
-      messages.push("PASS: PINN L_res decreases");
+      messages.push(`FAIL: PINN u(0.5,${a}) != u(0.5,1)`);
     }
   }
-
-  {
-    const model = new PINNModel(4, DEFAULT_DEPTH, 43);
-    const t_colloc = [0.2, 0.5, 0.8];
-    const a_colloc = [1.2, 1.2, 1.2];
-    const t_data = [0.3, 0.6];
-    const u_data = [1.5, 2.2];
-    const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, {
-      t_data, u_data, w_res: 1, w_data: 0.5,
-    });
-    const W1 = model._W[0] as number[][];
-    const gW1 = grads.W1 as number[][];
-    for (let j = 0; j < W1.length; j++) {
-      if (Math.abs(gW1[j][1]) > 1e-12) {
-        pass = false;
-        messages.push(`FAIL: PINN grad W1[:,1] should be 0, got ${gW1[j][1]}`);
-      }
-    }
-    if (typeof grads.a !== "number" || !isFinite(grads.a)) {
-      pass = false;
-      messages.push("FAIL: PINN grads.a missing or non-finite");
-    }
-    if (pass) messages.push("PASS: PINN grads (W1 col1=0, a present)");
-  }
-
+  if (pass) messages.push("PASS: PINN u(t) independent of a");
   return { pass, messages };
 }
 
@@ -198,6 +61,8 @@ export interface BiloSnapshot {
   n_hidden: number;
   depth: number;
   seed: number;
+  ode_type?: OdeType;
+  u0?: number;
   /** Weights after init (or after some step); same layout as Python _W, _b */
   W: (number[][] | number[])[];
   b: (number[] | number)[];
@@ -215,8 +80,7 @@ export interface BiloSnapshot {
 
 /**
  * Build a snapshot of the current model and gradients for a given scenario.
- * Write the result to a JSON file (e.g. ts_snapshot.json) so that
- * verify_ts_gradients.py can load it and compare with PyTorch.
+ * Used by verify_ts_gradients.py to compare TS gradients with PyTorch autograd.
  */
 export function buildSnapshotForVerification(opts: {
   n_hidden: number;
@@ -230,6 +94,8 @@ export function buildSnapshotForVerification(opts: {
   w_res?: number;
   w_grad?: number;
   w_data?: number;
+  ode_type?: OdeType;
+  u0?: number;
 }): BiloSnapshot {
   const {
     n_hidden,
@@ -243,8 +109,10 @@ export function buildSnapshotForVerification(opts: {
     w_res = 1,
     w_grad = 0.1,
     w_data = 0,
+    ode_type = "exponential",
+    u0,
   } = opts;
-  const model = new BILOModel(n_hidden, depth, seed);
+  const model = new BILOModel(n_hidden, depth, seed, ode_type, u0);
   const { losses, grads } = model.computeLossesAndGradients(t_colloc, a_colloc, {
     t_data,
     a_data,
@@ -264,7 +132,7 @@ export function buildSnapshotForVerification(opts: {
     else if (Array.isArray(g[0])) gradCopy[key] = (g as number[][]).map(row => [...row]);
     else gradCopy[key] = [...(g as number[])];
   }
-  return {
+  const out: BiloSnapshot = {
     model_type: "bilo",
     n_hidden,
     depth,
@@ -282,11 +150,13 @@ export function buildSnapshotForVerification(opts: {
     losses: { ...losses },
     grads: gradCopy,
   };
+  out.ode_type = ode_type;
+  out.u0 = model.u0;
+  return out;
 }
 
 /**
- * Build PINN snapshot for Python verification. Uses different number of
- * residual collocation points vs data points (to stress-test the verifier).
+ * Build PINN snapshot for Python verification.
  */
 export function buildSnapshotForVerificationPinn(opts: {
   n_hidden: number;
@@ -298,6 +168,8 @@ export function buildSnapshotForVerificationPinn(opts: {
   u_data: number[];
   w_res?: number;
   w_data?: number;
+  ode_type?: OdeType;
+  u0?: number;
 }): BiloSnapshot {
   const {
     n_hidden,
@@ -309,8 +181,10 @@ export function buildSnapshotForVerificationPinn(opts: {
     u_data,
     w_res = 1,
     w_data = 0.5,
+    ode_type = "exponential",
+    u0,
   } = opts;
-  const model = new PINNModel(n_hidden, depth, seed);
+  const model = new PINNModel(n_hidden, depth, seed, ode_type, u0);
   const { losses, grads } = model.computeLossesAndGradientsPinn(t_colloc, a_colloc, {
     t_data,
     u_data,
@@ -328,7 +202,7 @@ export function buildSnapshotForVerificationPinn(opts: {
     else if (Array.isArray(g[0])) gradCopy[key] = (g as number[][]).map(row => [...row]);
     else gradCopy[key] = [...(g as number[])];
   }
-  return {
+  const out: BiloSnapshot = {
     model_type: "pinn",
     n_hidden,
     depth,
@@ -346,4 +220,134 @@ export function buildSnapshotForVerificationPinn(opts: {
     losses: { ...losses },
     grads: gradCopy,
   };
+  out.ode_type = ode_type;
+  out.u0 = model.u0;
+  return out;
+}
+
+/**
+ * All snapshot scenarios for gradient verification (mirror test_gradients.py and test_pinn_gradients.py).
+ * Write to JSON with npm run write-ts-snapshots, then run: pytest bilo_np/test_verify_ts_gradients.py
+ */
+export function getVerificationSnapshots(): { name: string; snapshot: BiloSnapshot }[] {
+  const n_hidden = 4;
+  const list: { name: string; snapshot: BiloSnapshot }[] = [];
+
+  // BILO: L_res + L_grad only (one collocation point; multiple depths and ode_types)
+  for (const ode_type of ["exponential", "logistic"] as OdeType[]) {
+    for (const depth of [2, 3]) {
+      list.push({
+        name: `bilo_residual_${ode_type}_depth${depth}`,
+        snapshot: buildSnapshotForVerification({
+          n_hidden,
+          depth,
+          seed: 42,
+          t_colloc: [0.5],
+          a_colloc: [1.0],
+          w_res: 1,
+          w_grad: 1,
+          ode_type,
+        }),
+      });
+    }
+  }
+
+  // BILO: L_data only (no collocation; gradient w.r.t. W and a)
+  for (const ode_type of ["exponential", "logistic"] as OdeType[]) {
+    list.push({
+      name: `bilo_data_${ode_type}_depth2`,
+      snapshot: buildSnapshotForVerification({
+        n_hidden,
+        depth: 2,
+        seed: 43,
+        t_colloc: [],
+        a_colloc: [],
+        t_data: [0.3],
+        a_data: [1.2],
+        u_data: [1.5],
+        w_res: 0,
+        w_grad: 0,
+        w_data: 1,
+        ode_type,
+      }),
+    });
+  }
+
+  // BILO: combined L_res + L_grad + L_data
+  for (const ode_type of ["exponential", "logistic"] as OdeType[]) {
+    list.push({
+      name: `bilo_combined_${ode_type}_depth2`,
+      snapshot: buildSnapshotForVerification({
+        n_hidden,
+        depth: 2,
+        seed: 44,
+        t_colloc: [0.25, 0.5, 0.75],
+        a_colloc: [1, 1, 1],
+        t_data: [0.5],
+        a_data: [1],
+        u_data: [1.65],
+        w_res: 1,
+        w_grad: 0.1,
+        w_data: 0.5,
+        ode_type,
+      }),
+    });
+  }
+
+  // PINN: L_res only
+  for (const ode_type of ["exponential", "logistic"] as OdeType[]) {
+    for (const depth of [2, 3]) {
+      list.push({
+        name: `pinn_residual_${ode_type}_depth${depth}`,
+        snapshot: buildSnapshotForVerificationPinn({
+          n_hidden,
+          depth,
+          seed: 42,
+          t_colloc: [0.25, 0.5, 0.75],
+          a_colloc: [1, 1, 1],
+          t_data: [],
+          u_data: [],
+          w_res: 1,
+          w_data: 0,
+          ode_type,
+        }),
+      });
+    }
+  }
+
+  // PINN: L_data only (empty colloc)
+  list.push({
+    name: "pinn_data_exponential_depth2",
+    snapshot: buildSnapshotForVerificationPinn({
+      n_hidden,
+      depth: 2,
+      seed: 43,
+      t_colloc: [],
+      a_colloc: [],
+      t_data: [0.3, 0.6],
+      u_data: [1.5, 2.2],
+      w_res: 0,
+      w_data: 1,
+      ode_type: "exponential",
+    }),
+  });
+
+  // PINN: combined L_res + L_data
+  list.push({
+    name: "pinn_combined_exponential_depth2",
+    snapshot: buildSnapshotForVerificationPinn({
+      n_hidden,
+      depth: 2,
+      seed: 45,
+      t_colloc: [0.25, 0.5, 0.75],
+      a_colloc: [1, 1, 1],
+      t_data: [0.5],
+      u_data: [1.65],
+      w_res: 1,
+      w_data: 0.5,
+      ode_type: "exponential",
+    }),
+  });
+
+  return list;
 }

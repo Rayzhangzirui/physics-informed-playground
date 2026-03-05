@@ -6,12 +6,8 @@ import * as d3 from "d3";
 import { BILOModel, PINNModel, runBiloTests, runPinnTests } from "./bilo";
 
 const RECT_SIZE = 32;
-const NETWORK_HEIGHT = 320;
-/** Width grows with depth so layers fit; min for 2 layers. */
-function getNetworkWidth(): number {
-  const d = model ? model.depth : 2;
-  return Math.max(380, 80 * (d + 2));
-}
+const NETWORK_HEIGHT_MIN = 400;
+/** Network fills the features column; width comes from container. */
 const T_MIN = 0;
 const T_MAX = 1;
 const T_PLOT_MAX = 1; // u(t) only show t in [0, 1]
@@ -24,14 +20,15 @@ let isPlaying = false;
 let timerId: number | null = null;
 
 // Options (from UI)
-let lr = 0.02;
+let lr = 0.001;
 let lrA = 0.001;
-let depthOption = 2; // 2 = one hidden layer, 3 = two hidden, …
+let depthOption = 3; // 2 = one hidden layer, 3 = two hidden, …
 let nHidden = 4;
-let nPoints = 21;    // same points for residual and data loss
+let nPoints = 21;    // residual (collocation) points for L_res and L_grad
+let nDataPoints = 11; // data points for L_data (finetune)
 let wRes = 1;
 let wGrad = 0.1;
-let wData = 0.5;
+let wData = 1.0;
 let aParam = 1;      // network input a (pretrain fixed, finetune initial)
 let aParamGT = 2;    // ground-truth a for generating training data (dashed line)
 let noiseLevel = 0; // uniform noise added to training data: u += U(-noise, +noise)
@@ -55,8 +52,14 @@ let trainingData: { t_data: number[]; u_data: number[] } | null = null;
   );
 }
 
-function getTPoints(): number[] {
-  return Array.from({ length: nPoints }, (_, i) => T_MIN + (T_MAX - T_MIN) * i / (nPoints - 1));
+/** Residual/collocation points for L_res (and L_grad in BILO). */
+function getResidualPoints(): number[] {
+  return Array.from({ length: nPoints }, (_, i) => T_MIN + (T_MAX - T_MIN) * i / Math.max(1, nPoints - 1));
+}
+
+/** Data points for L_data (finetune); can differ from nPoints. */
+function getDataPointsGrid(): number[] {
+  return Array.from({ length: nDataPoints }, (_, i) => T_MIN + (T_MAX - T_MIN) * i / Math.max(1, nDataPoints - 1));
 }
 
 function buildModel() {
@@ -65,14 +68,14 @@ function buildModel() {
   } else {
     model = new BILOModel(nHidden, depthOption, 42);
   }
-  t_colloc = getTPoints();
+  t_colloc = getResidualPoints();
   a_learned = aParam;
   a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
 }
 
-/** Training data on the same grid as t_colloc (for residual + data loss). */
+/** Training data for L_data only; uses nDataPoints (can differ from residual nPoints). */
 function generateTrainingData(): { t_data: number[]; u_data: number[] } {
-  const t_data = t_colloc.slice();
+  const t_data = getDataPointsGrid();
   const u_data = t_data.map(t => {
     const u = Math.exp(aParamGT * t);
     const noise = (2 * Math.random() - 1) * noiseLevel;
@@ -232,6 +235,11 @@ function fillHeatmapCanvasU(canvas: HTMLCanvasElement, data: number[][]) {
 function drawNetwork(container: d3.Selection<any>) {
   container.selectAll("*").remove();
 
+  // Use container width (fills features column) like original TF Playground
+  const parentEl = (container.node() as HTMLElement).parentElement;
+  const networkWidth = parentEl ? Math.max(400, parentEl.clientWidth - 20) : 480;
+  const networkHeight = Math.max(NETWORK_HEIGHT_MIN, parentEl ? parentEl.clientHeight - 60 : 420);
+
   const d = model.depth;
   const numHiddenLayers = d - 1;
   // Layers: [t, a] -> hidden_0 -> ... -> hidden_{d-2} -> [N] -> [u]
@@ -239,23 +247,15 @@ function drawNetwork(container: d3.Selection<any>) {
   layers.push({ ids: ["t", "a"], labels: ["t", "a"] });
   for (let L = 0; L < numHiddenLayers; L++) {
     const ids = Array.from({ length: nHidden }, (_, i) => `L${L}-${i}`);
-    const Wnext = model._W[L + 1];
-    const isLastHidden = L === numHiddenLayers - 1;
-    const labels = ids.map((_, j) => {
-      if (isLastHidden) return ((Wnext as number[])[j] * 100).toFixed(0);
-      const row = (Wnext as number[][])[j];
-      return row ? (row[0] * 100).toFixed(0) : "";
-    });
-    layers.push({ ids, labels, layerIndex: L });
+    layers.push({ ids, labels: ids.map(() => ""), layerIndex: L }); // no numbers on heatmap
   }
   layers.push({ ids: ["N"], labels: ["N"] });
   layers.push({ ids: ["u"], labels: ["u"] });
 
-  const networkWidth = getNetworkWidth();
   const padding = 24;
-  const totalH = NETWORK_HEIGHT - 2 * padding;
+  const totalH = networkHeight - 2 * padding;
   const numLayers = layers.length;
-  const layerWidth = Math.min(56, (networkWidth - 2 * padding) / (numLayers + 1));
+  const layerWidth = (networkWidth - 2 * padding) / (numLayers + 1); // more layers => smaller spacing
 
   const node2coord: { [id: string]: { cx: number; cy: number } } = {};
   layers.forEach((layer, li) => {
@@ -280,6 +280,14 @@ function drawNetwork(container: d3.Selection<any>) {
   const sigmaGridAll = model.getSigmaGridAllLayers(tGrid, aGrid);
   const nGrid = model.getNGrid(tGrid, aGrid);
   const uGrid = model.getUGrid(tGrid, aGrid);
+
+  // Input nodes t and a: mini heatmaps (built here, drawn after SVG so they sit on top)
+  const tGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
+    Array.from({ length: HEATMAP_SAMPLES }, () => 2 * tGrid[ix] - 1)
+  );
+  const aGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
+    Array.from({ length: HEATMAP_SAMPLES }, (_, iy) => (aGrid[iy] - 1.5) / 0.5)
+  );
 
   // Heatmaps for N and u
   ["N", "u"].forEach((id) => {
@@ -317,22 +325,42 @@ function drawNetwork(container: d3.Selection<any>) {
     }
   }
 
-  const svg = container.append("svg").attr("width", networkWidth).attr("height", NETWORK_HEIGHT);
+  const svg = container.append("svg").attr("width", networkWidth).attr("height", networkHeight);
   const g = svg.append("g").attr("class", "core");
 
-  function drawLink(fromId: string, toId: string, weight: number) {
-    const from = node2coord[fromId];
-    const to = node2coord[toId];
-    if (!from || !to) return;
-    const x1 = from.cx + RECT_SIZE / 2;
-    const y1 = from.cy;
-    const x2 = to.cx - RECT_SIZE / 2;
-    const y2 = to.cy;
-    const strokeW = Math.max(0.5, Math.abs(weight) * 3);
-    g.insert("line", ":first-child")
-      .attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2)
-      .attr("stroke", colorScale(Math.tanh(weight)) as any).attr("stroke-width", strokeW);
+  function cosLinkPath(x1: number, y1: number, x2: number, y2: number, n = 30): string {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+  
+    let d = `M ${x1},${y1}`;
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const x = x1 + dx * t;
+      const s = (1 - Math.cos(Math.PI * t)) / 2; // flat slope at endpoints
+      const y = y1 + dy * s;
+      d += ` L ${x},${y}`;
+    }
+    return d;
   }
+
+  function drawLink(fromId: string, toId: string, weight: number) {
+  const from = node2coord[fromId];
+  const to = node2coord[toId];
+  if (!from || !to) return;
+
+  const x1 = from.cx + RECT_SIZE / 2 + 2;
+  const y1 = from.cy;
+  const x2 = to.cx - RECT_SIZE / 2;
+  const y2 = to.cy;
+
+  const strokeW = Math.max(0.5, Math.abs(weight) * 3);
+
+  g.insert("path", ":first-child")
+    .attr("d", cosLinkPath(x1, y1, x2, y2))
+    .attr("fill", "none")
+    .attr("stroke", colorScale(Math.tanh(weight)))
+    .attr("stroke-width", strokeW);
+}
 
   // Links: input -> hidden0; hidden_k -> hidden_{k+1}; last hidden -> N; N -> u
   const W0 = model._W[0] as number[][];
@@ -354,12 +382,13 @@ function drawNetwork(container: d3.Selection<any>) {
   }
   drawLink("N", "u", 1);
 
-  // Node rects and labels
+  // Node rects and labels (no numbers on heatmap nodes); t and a have heatmaps so rect fill none
   layers.forEach((layer, li) => {
     layer.ids.forEach((id, j) => {
       const { cx, cy } = node2coord[id];
       let fillColor = "#888";
-      if (layer.layerIndex !== undefined) {
+      if (id === "t" || id === "a") fillColor = "none"; // heatmap shows through
+      else if (layer.layerIndex !== undefined) {
         const lastHidden = layer.layerIndex === numHiddenLayers - 1;
         const w = lastHidden ? (model._W[d - 1] as number[])[j] : 0;
         fillColor = colorScale(Math.tanh(w)) as any;
@@ -372,8 +401,36 @@ function drawNetwork(container: d3.Selection<any>) {
       g.append("text")
         .attr("x", cx).attr("y", cy + 4).attr("text-anchor", "middle")
         .attr("font-size", li === 0 ? "12px" : "10px")
-        .text(layer.labels[j] || id);
+        .text(layer.labels[j] || (id === "t" || id === "a" || id === "N" || id === "u" ? id : ""));
     });
+  });
+
+  // Formula below output node
+  const uPos = node2coord["u"];
+  if (uPos) {
+    g.append("text")
+      .attr("x", uPos.cx)
+      .attr("y", uPos.cy + RECT_SIZE / 2 + 14)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "11px")
+      .attr("fill", "#333")
+      .text(modelType === "pinn" ? "u = 1 + t·N(t;W)" : "u = 1 + t·N(t,a;W)");
+  }
+
+  // Input nodes t and a: draw heatmap divs on top of SVG so they are visible
+  ["t", "a"].forEach((id) => {
+    const pos = node2coord[id];
+    if (!pos) return;
+    const left = pos.cx - RECT_SIZE / 2;
+    const top = pos.cy - RECT_SIZE / 2;
+    const grid = id === "t" ? tGrid2D : aGrid2D;
+    const div = container.append("div")
+      .attr("id", "canvas-" + id).attr("class", "canvas")
+      .style("position", "absolute").style("left", left + "px").style("top", top + "px")
+      .style("width", RECT_SIZE + "px").style("height", RECT_SIZE + "px").style("pointer-events", "none");
+    const canvas = div.append("canvas").attr("width", HEATMAP_SAMPLES).attr("height", HEATMAP_SAMPLES)
+      .style("width", "100%").style("height", "100%");
+    fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, grid, RECT_SIZE);
   });
 }
 
@@ -448,10 +505,18 @@ function redrawLossChart() {
   svg.append("g").attr("class", "axis y-axis").call(yAxis);
 
   const legend = svg.append("g").attr("transform", "translate(" + (width + 2) + ",0)");
+  const subLabels: Record<string, string> = { L_res: "res", L_grad: "grad", L_data: "data" };
   series.forEach((s, i) => {
     legend.append("line").attr("x1", 0).attr("y1", i * 10).attr("x2", 8).attr("y2", i * 10)
       .attr("stroke", s.color).attr("stroke-width", s.key === "total" ? 1.5 : 1);
-    legend.append("text").attr("x", 10).attr("y", i * 10 + 3).attr("font-size", "8px").text(s.key);
+    const txt = legend.append("text").attr("x", 10).attr("y", i * 10 + 3).attr("font-size", "8px");
+    if (s.key === "total") {
+      txt.text("total");
+    } else {
+      const sub = subLabels[s.key] || s.key;
+      txt.append("tspan").text("L");
+      txt.append("tspan").attr("baseline-shift", "sub").attr("font-size", "6px").text(sub);
+    }
   });
 }
 
@@ -467,16 +532,17 @@ function redrawPlot() {
   const node = container.node() as HTMLElement;
   const w = node.offsetWidth || 500;
   const h = node.offsetHeight || 240;
-  const margin = { top: 8, right: 80, bottom: 28, left: 40 };
+  const margin = { top: 8, right: 120, bottom: 28, left: 40 };
   const width = w - margin.left - margin.right;
   const height = h - margin.top - margin.bottom;
 
   const aDisplay = mode === "pretrain" ? aParam : a_learned;
   const tPlot = Array.from({ length: N_PLOT }, (_, i) => 0 + (T_PLOT_MAX - 0) * i / (N_PLOT - 1));
   const uPred = model.evalUArray(tPlot, aDisplay);  // PINNModel.evalU ignores second arg
-  const uExact = tPlot.map(t => Math.exp(aParamGT * t));
+  const uExactGT = tPlot.map(t => Math.exp(aParamGT * t)); // ground truth (data-generating a)
+  const uAnalyticalCurrent = tPlot.map(t => Math.exp(aDisplay * t)); // analytical for current a
 
-  let yMax = Math.max(d3.max(uPred)!, d3.max(uExact)!);
+  let yMax = Math.max(d3.max(uPred)!, d3.max(uExactGT)!, d3.max(uAnalyticalCurrent)!);
   if (trainingData && trainingData.u_data.length > 0) {
     const dataMax = d3.max(trainingData.u_data)!;
     if (dataMax > yMax) yMax = dataMax;
@@ -499,7 +565,14 @@ function redrawPlot() {
     .attr("d", line);
 
   plotSvg.append("path")
-    .datum(uExact)
+    .datum(uAnalyticalCurrent)
+    .attr("fill", "none")
+    .attr("stroke", "#666")
+    .attr("stroke-width", 1.5)
+    .attr("d", line);
+
+  plotSvg.append("path")
+    .datum(uExactGT)
     .attr("fill", "none")
     .attr("stroke", "#333")
     .attr("stroke-width", 1.5)
@@ -525,22 +598,36 @@ function redrawPlot() {
   plotSvg.append("g").attr("class", "axis").call(yAxis);
 
   const legendY = 14;
+  const modelLabel = modelType === "pinn" ? "PINN" : "BILO";
+  const aStr = aDisplay.toFixed(2);
   plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY).attr("x2", width + 28).attr("y2", legendY)
     .attr("stroke", "#0877bd").attr("stroke-width", 2);
-  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 4).attr("font-size", "11px").text("BiLO");
+  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 4).attr("font-size", "11px")
+    .text(modelLabel + " (a=" + aStr + ")");
   plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 18).attr("x2", width + 28).attr("y2", legendY + 18)
+    .attr("stroke", "#666").attr("stroke-width", 1.5);
+  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 22).attr("font-size", "11px")
+    .text("Analytical (a=" + aStr + ")");
+  plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 36).attr("x2", width + 28).attr("y2", legendY + 36)
     .attr("stroke", "#333").attr("stroke-width", 1.5).attr("stroke-dasharray", "4,2");
-  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 22).attr("font-size", "11px").text("GT");
+  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 40).attr("font-size", "11px")
+    .text("GT (a=" + aParamGT + ")");
   if (trainingData && trainingData.t_data.length > 0) {
-    plotSvg.append("circle").attr("cx", width + 18).attr("cy", legendY + 36).attr("r", 3)
+    plotSvg.append("circle").attr("cx", width + 18).attr("cy", legendY + 54).attr("r", 3)
       .attr("fill", "#c00").attr("stroke", "#fff").attr("stroke-width", 1);
-    plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 40).attr("font-size", "11px").text("Data");
+    plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 58).attr("font-size", "11px").text("Data");
   }
 }
 
 function updateUI() {
   ensureTrainingData();
   d3.select("#iter-number").text(iter);
+  // Sync parameter a control with network: in finetune show a_learned so user sees updates
+  const aInput = d3.select("#aParam").node() as HTMLInputElement;
+  if (aInput) {
+    const aVal = mode === "finetune" ? a_learned : aParam;
+    aInput.value = String(Math.round(aVal * 1000) / 1000);
+  }
   drawNetwork(d3.select("#network"));
   redrawPlot();
   redrawLossChart();
@@ -584,18 +671,28 @@ function pause() {
 
 function syncOptionsFromUI() {
   modelType = (d3.select("#modelType").node() as HTMLSelectElement).value as "bilo" | "pinn";
-  lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.02;
+  lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.001;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
-  depthOption = Math.max(2, Math.min(5, +(d3.select("#depth").node() as HTMLInputElement).value || 2));
-  nHidden = Math.max(2, Math.min(16, +(d3.select("#nHidden").node() as HTMLInputElement).value || 4));
-  nPoints = Math.max(5, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
+  // depthOption and nHidden are updated by +/- buttons; sync from display if present
+  const depthEl = document.getElementById("depth-value");
+  if (depthEl) {
+    const numLayers = parseInt(depthEl.textContent || "1", 10);
+    depthOption = Math.max(2, Math.min(4, numLayers + 1)); // numLayers 1..3 => depth 2..4
+  }
+  const nHiddenEl = document.getElementById("nHidden-value");
+  if (nHiddenEl) {
+    nHidden = Math.max(2, Math.min(16, parseInt(nHiddenEl.textContent || "4", 10)));
+  }
+  nPoints = Math.max(3, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
+  nDataPoints = Math.max(2, Math.min(101, +(d3.select("#nDataPoints").node() as HTMLInputElement).value || 11));
   wRes = +(d3.select("#wRes").node() as HTMLInputElement).value || 1;
   wGrad = +(d3.select("#wGrad").node() as HTMLInputElement).value || 0.1;
-  wData = +(d3.select("#wData").node() as HTMLInputElement).value || 0.5;
-  aParam = +(d3.select("#aParam").node() as HTMLInputElement).value || 1;
+  wData = +(d3.select("#wData").node() as HTMLInputElement).value || 1.0;
+  mode = (d3.select("#mode").node() as HTMLSelectElement).value as "pretrain" | "finetune";
+  aParam = Math.max(0.1, Math.min(3, +(d3.select("#aParam").node() as HTMLInputElement).value || 1));
+  if (mode === "finetune") a_learned = aParam; // sync from control when in finetune
   aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
   noiseLevel = Math.max(0, Math.min(0.5, +(d3.select("#noise").node() as HTMLInputElement).value || 0));
-  mode = (d3.select("#mode").node() as HTMLSelectElement).value as "pretrain" | "finetune";
   const wGradControl = d3.select("#wGradControl");
   if (modelType === "pinn") wGradControl.style("opacity", "0.5").style("pointer-events", "none");
   else wGradControl.style("opacity", "1").style("pointer-events", "auto");
@@ -603,6 +700,8 @@ function syncOptionsFromUI() {
 
 function init() {
   syncOptionsFromUI();
+  d3.select("#depth-value").text(String(depthOption - 1));
+  d3.select("#nHidden-value").text(String(nHidden));
   buildModel();
   updateUI();
 
@@ -621,21 +720,38 @@ function init() {
     pause();
     reset();
   });
-  d3.select("#depth").on("change", function() {
-    syncOptionsFromUI();
-    pause();
-    reset();
+
+  // +/- buttons for hidden layers (depth 2 = 1 layer, 3 = 2, 4 = 3)
+  function updateDepthDisplay() {
+    d3.select("#depth-value").text(String(depthOption - 1));
+  }
+  d3.select("#depth-plus").on("click", () => {
+    if (depthOption < 4) { depthOption++; updateDepthDisplay(); pause(); reset(); }
   });
-  d3.select("#nHidden").on("change", function() {
-    syncOptionsFromUI();
-    pause();
-    reset();
+  d3.select("#depth-minus").on("click", () => {
+    if (depthOption > 2) { depthOption--; updateDepthDisplay(); pause(); reset(); }
+  });
+
+  // +/- buttons for neurons per layer
+  function updateNHiddenDisplay() {
+    d3.select("#nHidden-value").text(String(nHidden));
+  }
+  d3.select("#nHidden-plus").on("click", () => {
+    if (nHidden < 16) { nHidden++; updateNHiddenDisplay(); pause(); reset(); }
+  });
+  d3.select("#nHidden-minus").on("click", () => {
+    if (nHidden > 2) { nHidden--; updateNHiddenDisplay(); pause(); reset(); }
   });
   d3.select("#nPoints").on("change", function() {
     syncOptionsFromUI();
-    t_colloc = getTPoints();
+    t_colloc = getResidualPoints();
     a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
     if (mode === "finetune") trainingData = generateTrainingData();
+  });
+  d3.select("#nDataPoints").on("change", function() {
+    syncOptionsFromUI();
+    if (mode === "finetune") trainingData = generateTrainingData();
+    redrawPlot();
   });
   d3.select("#aParamGT").on("change", function() {
     syncOptionsFromUI();
@@ -651,8 +767,10 @@ function init() {
   d3.select("#wGrad").on("change", () => syncOptionsFromUI());
   d3.select("#wData").on("change", () => syncOptionsFromUI());
   d3.select("#aParam").on("change", function() {
-    aParam = +(this as HTMLInputElement).value || 1;
-    if (mode === "pretrain") a_colloc = t_colloc.map(() => aParam);
+    const v = +(this as HTMLInputElement).value || 1;
+    aParam = Math.max(0.1, Math.min(3, v));
+    if (mode === "finetune") a_learned = aParam;
+    a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
     redrawPlot();
   });
   d3.select("#mode").on("change", function() {

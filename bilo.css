@@ -39,6 +39,19 @@
   font-size: 18px;
 }
 
+#bilo-page .bilo-plus-minus .plus-minus-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#bilo-page .bilo-plus-minus .plus-minus-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+
 /* Main part: strict 2-column layout (override original 3-column .features / .output widths) */
 #bilo-page #main-part {
   display: flex;
@@ -51,17 +64,18 @@
 }
 
 #bilo-page #main-part .column.features.bilo-network-col {
-  width: 50%;
-  flex: 1 1 0%;
+  width: 55%;
+  flex: 1 1 55%;
   min-width: 0;
-  max-width: 50%;
+  max-width: 55%;
+  min-height: 460px;
 }
 
 #bilo-page #main-part .column.output.bilo-output-col {
-  width: 50%;
-  flex: 1 1 0%;
+  width: 45%;
+  flex: 1 1 45%;
   min-width: 0;
-  max-width: 50%;
+  max-width: 45%;
 }
 
 #bilo-page .bilo-formula {
@@ -81,12 +95,12 @@
   color: #777;
 }
 
-/* Network diagram: scroll horizontally when depth > 2 */
+/* Network diagram: fill container, TF Playground style */
 #bilo-page #network {
   position: relative;
-  overflow-x: auto;
-  overflow-y: hidden;
-  min-height: 320px;
+  overflow: visible;
+  min-height: 400px;
+  width: 100%;
 }
 
 #bilo-page #network-diagram svg {

@@ -36,8 +36,8 @@
         <label for="modelType">Model</label>
         <div class="select">
           <select id="modelType">
-            <option value="bilo">BILO (u(t,a;W))</option>
-            <option value="pinn">PINN (u(t;W), a param)</option>
+            <option value="bilo">BILO</option>
+            <option value="pinn">PINN</option>
           </select>
         </div>
       </div>
@@ -45,22 +45,42 @@
         <label for="mode">Mode</label>
         <div class="select">
           <select id="mode">
-            <option value="pretrain">Pretrain (a fixed)</option>
-            <option value="finetune">Finetune (a from data)</option>
+            <option value="pretrain">Pretrain</option>
+            <option value="finetune">Finetune</option>
           </select>
         </div>
       </div>
-      <div class="control">
-        <label for="depth">Depth</label>
-        <input type="number" id="depth" min="2" max="5" value="2" class="control-input" title="Layers: 2 = 1 hidden, 3 = 2 hidden, …">
+      <div class="control bilo-plus-minus">
+        <label>Hidden layers</label>
+        <div class="plus-minus-row">
+          <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="depth-minus" title="Fewer layers">
+            <i class="material-icons">remove</i>
+          </button>
+          <span class="plus-minus-value" id="depth-value">2</span>
+          <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="depth-plus" title="More layers">
+            <i class="material-icons">add</i>
+          </button>
+        </div>
+      </div>
+      <div class="control bilo-plus-minus">
+        <label>Neurons</label>
+        <div class="plus-minus-row">
+          <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="nHidden-minus" title="Fewer neurons">
+            <i class="material-icons">remove</i>
+          </button>
+          <span class="plus-minus-value" id="nHidden-value">4</span>
+          <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="nHidden-plus" title="More neurons">
+            <i class="material-icons">add</i>
+          </button>
+        </div>
       </div>
       <div class="control">
-        <label for="nHidden">Hidden neurons</label>
-        <input type="number" id="nHidden" min="2" max="16" value="4" class="control-input">
+        <label for="nPoints">Residual points</label>
+        <input type="number" id="nPoints" min="3" max="101" value="21" class="control-input" title="Collocation points for L_res (and L_grad in BILO)">
       </div>
       <div class="control">
-        <label for="nPoints">Points</label>
-        <input type="number" id="nPoints" min="5" max="101" value="21" class="control-input">
+        <label for="nDataPoints">Data points</label>
+        <input type="number" id="nDataPoints" min="2" max="101" value="21" class="control-input" title="Points for L_data (finetune)">
       </div>
       <div class="control">
         <label for="learningRate">Learning rate (W)</label>
@@ -71,15 +91,15 @@
         <input type="number" id="lrA" min="0.0001" max="0.05" step="0.0001" value="0.001" class="control-input">
       </div>
       <div class="control">
-        <label for="wRes">w_res</label>
+        <label for="wRes">w<sub>res</sub></label>
         <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input">
       </div>
       <div class="control" id="wGradControl">
-        <label for="wGrad">w_grad</label>
+        <label for="wGrad">w<sub>grad</sub></label>
         <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input" title="BILO only">
       </div>
       <div class="control">
-        <label for="wData">w_data</label>
+        <label for="wData">w<sub>data</sub></label>
         <input type="number" id="wData" min="0" max="2" step="0.1" value="0.5" class="control-input">
       </div>
       <div class="control">
@@ -101,7 +121,6 @@
     <div class="column features bilo-network-col">
       <h4>Network</h4>
       <div id="network"></div>
-      <p class="bilo-formula">u = 1 + t·N(t,a; W)</p>
     </div>
     <div class="column output bilo-output-col">
       <h4>Output</h4>

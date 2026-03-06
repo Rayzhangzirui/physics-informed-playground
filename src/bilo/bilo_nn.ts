@@ -531,6 +531,36 @@ export class BILOModel {
       b: this._b.map(b => (typeof b === "number" ? b : [...b])),
     };
   }
+
+  /** Set weights and biases from a snapshot (same shape as exportForVerification). No-op if shape mismatch. */
+  setWeights(snapshot: { depth: number; n_hidden: number; W: (number[][] | number[])[]; b: (number[] | number)[] }): boolean {
+    if (snapshot.depth !== this.depth || snapshot.n_hidden !== this.n_hidden) return false;
+    if (snapshot.W.length !== this._W.length || snapshot.b.length !== this._b.length) return false;
+    for (let k = 0; k < this.depth; k++) {
+      const w = this._W[k];
+      const sw = snapshot.W[k];
+      if (Array.isArray(w[0])) {
+        const W = w as number[][], SW = sw as number[][];
+        if (W.length !== SW.length || (W[0] && W[0].length !== SW[0].length)) return false;
+        for (let i = 0; i < W.length; i++) for (let j = 0; j < W[i].length; j++) W[i][j] = SW[i][j];
+      } else {
+        const W = w as number[], SW = sw as number[];
+        if (W.length !== SW.length) return false;
+        for (let j = 0; j < W.length; j++) W[j] = SW[j];
+      }
+      const b = this._b[k];
+      const sb = snapshot.b[k];
+      if (typeof b === "number") {
+        if (typeof sb !== "number") return false;
+        (this._b[k] as number) = sb;
+      } else {
+        const B = b as number[], SB = sb as number[];
+        if (B.length !== SB.length) return false;
+        for (let j = 0; j < B.length; j++) B[j] = SB[j];
+      }
+    }
+    return true;
+  }
 }
 
 // -----------------------------------------------------------------------------

@@ -1,10 +1,40 @@
 /* BILO page: match original TF Playground layout and sizing */
 
+#bilo-page {
+  position: relative;
+}
+
 #bilo-page header {
-  background-color: #CBBD93;
+  background-color: #183D4E;
+}
+
+/* GitHub link: top right (dark icon on tan header) */
+#bilo-page .github-link {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1000;
+  width: 60px;
+  height: 60px;
+  display: block;
+}
+#bilo-page .github-link .bg {
+  fill: rgba(0,0,0,0.15);
+}
+#bilo-page .github-link:hover .bg {
+  fill: rgba(0,0,0,0.25);
+}
+#bilo-page .github-link .icon {
+  fill: #333;
+  fill-opacity: 0.8;
+}
+#bilo-page .github-link:hover .icon {
+  fill-opacity: 1;
 }
 
 #bilo-page .bilo-network-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -18,7 +48,7 @@
 #bilo-page .bilo-network-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
 #bilo-page #top-controls .container {
@@ -32,41 +62,44 @@
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: 0 8px;
-}
-
-/* Tighter spacing between Model / Optimizer / Mode toggle groups */
-#bilo-page #top-controls .control-row .control.bilo-toggle-group {
-  margin-right: -4px;
+  gap: 8px;
 }
 
 #bilo-page .bilo-toggle-group {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
+  gap: 6px;
 }
 
+/* Toggle label: same style as other control labels (e.g. Residual points) */
 #bilo-page .bilo-toggle-group .toggle-label {
-  font-size: 11px;
-  color: #666;
+  font-size: 13px;
+  color: #777;
+  font-weight: 300;
+  display: block;
+  margin-bottom: 0px;
 }
 
 #bilo-page .bilo-toggle {
   display: flex;
-  border: 1px solid #999;
+  border: 1px solid #ccc;
   border-radius: 2px;
-  overflow: hidden;
+  overflow: visible;
+  min-height: 28px;
+  box-sizing: border-box;
 }
 
 #bilo-page .bilo-toggle-btn {
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: 13px;
   border: none;
   background: #fff;
   color: #333;
   cursor: pointer;
-  border-right: 1px solid #999;
+  border-right: 1px solid #ccc;
+  box-sizing: border-box;
+  min-height: 26px;
 }
 
 #bilo-page .bilo-toggle-btn:last-child {
@@ -84,7 +117,7 @@
 
 #bilo-page #top-controls .control.bilo-toggle-group {
   max-width: none;
-  min-width: 140px;
+  min-width: 120px;
 }
 
 #bilo-page #top-controls .control {
@@ -99,6 +132,7 @@
   display: block;
   width: 100%;
   max-width: 70px;
+  height: 28px;
   padding: 4px 6px;
   font-size: 13px;
   border: 1px solid #ccc;
@@ -130,7 +164,7 @@
 #bilo-page .bilo-plus-minus .plus-minus-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 #bilo-page .bilo-plus-minus .plus-minus-value {
@@ -138,6 +172,48 @@
   text-align: center;
   font-size: 14px;
   font-weight: 500;
+}
+
+/* Save / Reload weights: minimal boxed buttons */
+#bilo-page .bilo-weights-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #333;
+  background: #fff;
+  border: 1px solid #999;
+  border-radius: 2px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+#bilo-page .bilo-weights-btn:hover {
+  background: #f5f5f5;
+}
+#bilo-page .bilo-weights-btn:active {
+  opacity: 0.9;
+}
+/* CSS tooltip so hover always shows text (native title can be delayed or blocked) */
+#bilo-page .bilo-weights-btn[data-tooltip]:hover::after,
+#bilo-page .bilo-toggle-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #333;
+  background: #fff;
+  border: 1px solid #999;
+  border-radius: 2px;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+}
+#bilo-page .bilo-weights-btn[data-tooltip],
+#bilo-page .bilo-toggle-btn[data-tooltip] {
+  position: relative;
 }
 
 /* Main part: strict 2-column layout (override original 3-column .features / .output widths) */
@@ -190,6 +266,7 @@
 /* Network diagram: fill container, TF Playground style; no extra space above */
 #bilo-page #network {
   position: relative;
+  z-index: 1;
   overflow: visible;
   min-height: 400px;
   width: 100%;
@@ -267,4 +344,21 @@
 #bilo-page #plot-1d .axis text {
   fill: #777;
   font-size: 10px;
+}
+
+/* Article below main part (styled like original playground) */
+#bilo-page article {
+  background: #fff;
+  padding: 80px 0;
+  box-shadow: 0 0 4px rgba(0,0,0,0.1);
+}
+#bilo-page article :first-child h2 {
+  margin-top: 0;
+}
+#bilo-page article a {
+  color: #183D4E;
+  text-decoration: none;
+}
+#bilo-page article a:hover {
+  text-decoration: underline;
 }

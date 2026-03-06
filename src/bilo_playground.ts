@@ -41,7 +41,7 @@ let aParamGT = 2;    // ground-truth a for generating training data (dashed line
 let noiseLevel = 0; // uniform noise added to training data: u += U(-noise, +noise)
 let odeType: OdeType = "exponential";
 let u0: number = 1;
-let optimizer: "sgd" | "adam" = "sgd";
+let optimizer: "sgd" | "adam" = "adam";
 let modelType: "bilo" | "pinn" = "bilo";
 let mode: "pretrain" | "finetune" = "pretrain";
 let a_learned = 1;   // only used in finetune
@@ -52,6 +52,15 @@ let a_colloc: number[];
 
 // Training data for finetune (fixed until next reset; includes noise)
 let trainingData: { t_data: number[]; u_data: number[] } | null = null;
+
+/** Saved snapshot for load: weights, depth, n_hidden, and parameter a. */
+let savedWeightsSnapshot: {
+  depth: number;
+  n_hidden: number;
+  W: (number[][] | number[])[];
+  b: (number[] | number)[];
+  a: number;
+} | null = null;
 
 
 /** Residual/collocation points for L_res (and L_grad in BILO). */
@@ -426,18 +435,6 @@ function drawNetwork(container: d3.Selection<any>) {
     });
   });
 
-  // Formula below output node: u = u₀ + t·N(t,a;W) or u = u₀ + t·N(t;W) for PINN
-  const uPos = node2coord["u"];
-  if (uPos) {
-    g.append("text")
-      .attr("x", uPos.cx)
-      .attr("y", uPos.cy + RECT_SIZE / 2 + 14)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "11px")
-      .attr("fill", "#333")
-      .text(modelType === "pinn" ? "u = u₀ + t·N(t;W)" : "u = u₀ + t·N(t,a;W)");
-  }
-
   // Input nodes t and a (a hidden for PINN): draw heatmap divs on top of SVG
   (modelType === "pinn" ? ["t"] : ["t", "a"]).forEach((id) => {
     const pos = node2coord[id];
@@ -718,7 +715,7 @@ function syncOptionsFromUI() {
   }
   const nHiddenEl = document.getElementById("nHidden-value");
   if (nHiddenEl) {
-    nHidden = Math.max(2, Math.min(16, parseInt(nHiddenEl.textContent || "4", 10)));
+    nHidden = Math.max(2, Math.min(8, parseInt(nHiddenEl.textContent || "4", 10)));
   }
   nPoints = Math.max(3, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
   nDataPoints = Math.max(2, Math.min(101, +(d3.select("#nDataPoints").node() as HTMLInputElement).value || 11));
@@ -746,6 +743,29 @@ function init() {
   updateUI();
 
   d3.select("#reset-button").on("click", () => { pause(); reset(); });
+  d3.select("#save-weights-btn").on("click", () => {
+    const ver = model.exportForVerification();
+    savedWeightsSnapshot = {
+      depth: ver.depth,
+      n_hidden: ver.n_hidden,
+      W: ver.W,
+      b: ver.b,
+      a: mode === "finetune" ? a_learned : aParam,
+    };
+  });
+  d3.select("#load-weights-btn").on("click", () => {
+    if (!savedWeightsSnapshot) return;
+    if (savedWeightsSnapshot.depth !== model.depth || savedWeightsSnapshot.n_hidden !== model.n_hidden) return;
+    const ok = model.setWeights(savedWeightsSnapshot);
+    if (!ok) return;
+    aParam = savedWeightsSnapshot.a;
+    a_learned = savedWeightsSnapshot.a;
+    const aInput = d3.select("#aParam").node() as HTMLInputElement;
+    if (aInput) aInput.value = String(aParam);
+    a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
+    redrawPlot();
+    redrawLossChart();
+  });
   d3.select("#play-pause-button").on("click", function() {
     if (isPlaying) pause(); else play();
     d3.select(this).classed("playing", isPlaying);
@@ -814,7 +834,7 @@ function init() {
     d3.select("#nHidden-value").text(String(nHidden));
   }
   d3.select("#nHidden-plus").on("click", () => {
-    if (nHidden < 16) { nHidden++; updateNHiddenDisplay(); pause(); reset(); }
+    if (nHidden < 8) { nHidden++; updateNHiddenDisplay(); pause(); reset(); }
   });
   d3.select("#nHidden-minus").on("click", () => {
     if (nHidden > 2) { nHidden--; updateNHiddenDisplay(); pause(); reset(); }

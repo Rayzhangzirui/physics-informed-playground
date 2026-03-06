@@ -11,6 +11,13 @@
   <script src="lib.js"></script>
 </head>
 <body id="bilo-page">
+  <!-- GitHub link -->
+  <a class="github-link" href="https://github.com/tensorflow/playground" title="Source on GitHub" target="_blank">
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 60.5 60.5" width="60" height="60">
+      <polygon class="bg" points="60.5,60.5 0,0 60.5,0 "/>
+      <path class="icon" d="M43.1,5.8c-6.6,0-12,5.4-12,12c0,5.3,3.4,9.8,8.2,11.4c0.6,0.1,0.8-0.3,0.8-0.6c0-0.3,0-1,0-2c-3.3,0.7-4-1.6-4-1.6c-0.5-1.4-1.3-1.8-1.3-1.8c-1.1-0.7,0.1-0.7,0.1-0.7c1.2,0.1,1.8,1.2,1.8,1.2c1.1,1.8,2.8,1.3,3.5,1c0.1-0.8,0.4-1.3,0.8-1.6c-2.7-0.3-5.5-1.3-5.5-5.9c0-1.3,0.5-2.4,1.2-3.2c-0.1-0.3-0.5-1.5,0.1-3.2c0,0,1-0.3,3.3,1.2c1-0.3,2-0.4,3-0.4c1,0,2,0.1,3,0.4c2.3-1.6,3.3-1.2,3.3-1.2c0.7,1.7,0.2,2.9,0.1,3.2c0.8,0.8,1.2,1.9,1.2,3.2c0,4.6-2.8,5.6-5.5,5.9c0.4,0.4,0.8,1.1,0.8,2.2c0,1.6,0,2.9,0,3.3c0,0.3,0.2,0.7,0.8,0.6c4.8-1.6,8.2-6.1,8.2-11.4C55.1,11.2,49.7,5.8,43.1,5.8z"/>
+    </svg>
+  </a>
   <header>
     <h1 class="l--page">Physics-Informed Machine Learning Playground</h1>
   </header>
@@ -37,13 +44,9 @@
         <div class="control bilo-toggle-group">
           <span class="toggle-label">ODE</span>
           <div class="bilo-toggle" id="odeToggle">
-            <button type="button" class="bilo-toggle-btn active" data-value="exponential">u'=au</button>
-            <button type="button" class="bilo-toggle-btn" data-value="logistic">u'=au(1−u)</button>
+            <button type="button" class="bilo-toggle-btn active" data-value="exponential">\( u_t = au \)</button>
+            <button type="button" class="bilo-toggle-btn" data-value="logistic">\( u_t = au(1-u) \)</button>
           </div>
-        </div>
-          <div class="control">
-          <label for="u0">Initial \( u_0 \)</label>
-          <input type="number" id="u0" min="0.01" max="2" step="0.01" value="1" class="control-input" title="u(0); default 1 (exponential) or 0.1 (logistic)">
         </div>
         <div class="control bilo-toggle-group">
           <span class="toggle-label">Model</span>
@@ -55,24 +58,28 @@
         <div class="control bilo-toggle-group">
           <span class="toggle-label">Optimizer</span>
           <div class="bilo-toggle" id="optimizerToggle">
-            <button type="button" class="bilo-toggle-btn active" data-value="sgd">GD</button>
-            <button type="button" class="bilo-toggle-btn" data-value="adam">ADAM</button>
+            <button type="button" class="bilo-toggle-btn" data-value="sgd">GD</button>
+            <button type="button" class="bilo-toggle-btn active" data-value="adam">ADAM</button>
           </div>
         </div>
         <div class="control bilo-toggle-group">
           <span class="toggle-label">Mode</span>
           <div class="bilo-toggle" id="modeToggle">
-            <button type="button" class="bilo-toggle-btn active" data-value="pretrain">Pretrain</button>
-            <button type="button" class="bilo-toggle-btn" data-value="finetune">Finetune</button>
+            <button type="button" class="bilo-toggle-btn active" data-value="pretrain" title="a is fixed" data-tooltip="a is fixed">Pretrain</button>
+            <button type="button" class="bilo-toggle-btn" data-value="finetune" title="a is learned" data-tooltip="a is learned">Finetune</button>
           </div>
         </div>
+        <div class="control">
+        <label for="u0">Initial \( u_0 \)</label>
+        <input type="number" id="u0" min="0.01" max="2" step="0.01" value="1" class="control-input" title="u(0); default 1 (exponential) or 0.1 (logistic)">
+      </div>
         <div class="control-row">
           <div class="control">
-          <label for="aParam">Parameter a</label>
+          <label for="aParam">Learned \( a \)</label>
           <input type="number" id="aParam" min="0.1" max="10" step="0.1" value="1" class="control-input">
         </div>
           <div class="control">
-          <label for="aParamGT">a<sub>GT</sub></label>
+          <label for="aParamGT">\( a_{GT} \)</label>
           <input type="number" id="aParamGT" min="0.1" max="10" step="0.1" value="2" class="control-input">
         </div>
       </div>
@@ -98,12 +105,12 @@
         <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input">
       </div>
       <div class="control" id="wGradControl">
-        <label for="wGrad">w<sub>grad</sub></label>
+        <label for="wGrad">w<sub>rgrad</sub></label>
         <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input" title="BILO only">
       </div>
         <div class="control">
         <label for="wData">w<sub>data</sub></label>
-        <input type="number" id="wData" min="0" max="2" step="0.1" value="0.5" class="control-input">
+        <input type="number" id="wData" min="0" max="2" step="0.1" value="1" class="control-input">
       </div>
         <div class="control">
         <label for="noise">Noise</label>
@@ -142,6 +149,8 @@
               </button>
             </div>
           </div>
+          <button type="button" class="bilo-weights-btn" id="save-weights-btn" title="save current parameters" data-tooltip="save current parameters">save</button>
+          <button type="button" class="bilo-weights-btn" id="load-weights-btn" title="load saved parameters" data-tooltip="load saved parameters">reload</button>
         </div>
       </div>
       <div id="network"></div>
@@ -156,6 +165,57 @@
     </div>
   </div>
 
+  <!-- Article -->
+  <article id="article-text">
+    <div class="l--body">
+      <h2>What Is Physics-Informed Machine Learning?</h2>
+      <p>In many scientific problems, we want to infer unknown parameters of a physical system from observations while respecting known physical laws. For example, suppose we measure the number of cells over time and want to estimate how fast they grow. If we fit a neural network directly to the data, the model may overfit because the data is sparse or noisy. However, we often know something about the dynamics in advance. For instance, early cell growth is often modeled by the ordinary differential equation \(u_t = a u\), where \(u(t)\) is the cell population and \(a\) is an unknown growth rate.</p>
+      <p>Problems of this type are known as inverse problems, where the goal is to infer unknown parameters of a model from observed data. Inverse problems have been studied extensively in applied mathematics, statistics, and engineering. Physics-informed machine learning provides one way to approach such problems by combining data with physical models.</p>
+    </div>
+    <div class="l--body">
+      <h2>What Is BiLO?</h2>
+      <p><b>Bilevel Local Operator Learning</b> uses a neural network \(u(t,a;W)\) to represent the solution of the differential equation, where \(W\) are the network weights. The unknown parameter \(a\) is also included as an input to the neural network.</p>
+      <p>BiLO solves the following bilevel optimization problem</p>
+      <p>\[
+\begin{aligned}
+a^* &= \arg\min_a
+\underbrace{\frac{1}{N}\sum_i \left(u(t_i,a;W^*(a))-\hat u(t_i)\right)^2}_{\text{data loss}}, \\
+W^*(a) &= \arg\min_W \underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j,a;W)-a\,u(t_j,a;W)\right)^2}_{\text{residual loss}}+ \\
+& w_{\mathrm{rgrad}}  \underbrace{\frac{1}{N_r}\sum_j \left(\partial_a\big(u_t(t_j,a;W)-a\,u(t_j,a;W)\big)\right)^2}_{\text{residual-gradient loss}} .
+\end{aligned}
+\]</p>
+      <p>The lower-level problem trains the neural network to approximate a <b>local solution operator</b> near the current parameter value.</p>
+      <p>First, the <b>residual loss</b> enforces that the network approximately solves the PDE at the current parameter \(a\).</p>
+      <p>Second, the <b>residual-gradient</b> term ensures that small changes in \(a\) lead to small changes in the residual. This term is closely related to the <b>sensitivity</b> of the PDE with respect to the parameter. In other words, the network does not only solve the PDE at one parameter value, but also approximates how the solution varies in a small neighborhood of that parameter. This is different from classical <b>operator learning</b>, where the goal is to learn the full parameter-to-solution map over a wide range of parameters.</p>
+      <p>Once such a local operator is available, taking the derivative of the data loss with respect to the parameter provides a descent direction for updating the parameter while respecting the differential equation constraint.</p>
+    </div>
+    <div class="l--body">
+      <h2>What Is a PINN?</h2>
+      <p>A <b>Physics-Informed Neural Network (PINN)</b> represents the solution using a neural network \(u(t;W)\). In contrast to BiLO, the parameter \(a\) is not an input to the neural network, although it is still treated as a trainable variable.</p>
+      <p>PINNs solve a single optimization problem</p>
+      <p>\[
+\min_{W,a}
+\quad
+\underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j;W)-a\,u(t_j;W)\right)^2}_{\text{residual loss}}
++
+w_{\mathrm{data}}
+\underbrace{\frac{1}{N}\sum_i \left(u(t_i;W)-\hat u(t_i)\right)^2}_{\text{data loss}} .
+\]</p>
+      <p>In this formulation, the neural network is trained so that it both fits the observed data and the governing differential equation.</p>
+    </div>
+    <div class="l--body">
+      <h2>Interactive Playground</h2>
+      <p><b>Inspired by TensorFlow Playground.</b> This visualization is inspired by the original <a href="https://playground.tensorflow.org">TensorFlow Playground</a> created by Daniel Smilkov and Shan Carter. The original project made neural networks easier to understand through interactive visualization. This version adapts the same idea to illustrate concepts in physics-informed machine learning, including PINNs and BiLO.</p>
+      <p><b>Open Source.</b> The playground is open-sourced with the goal of making these ideas more accessible for teaching and learning. Feel free to reuse or modify it for educational purposes, demonstrations, or experimentation. Suggestions for improvements, extensions, or new features are welcome.</p>
+      <p><b>Web-Based Implementation.</b> As with the original TensorFlow Playground, everything runs directly in the browser. There is no PyTorch or TensorFlow behind the scenes. The playground uses a lightweight neural-network implementation written in JavaScript, including a small manual backpropagation engine capable of computing the higher-order derivatives required for physics-informed learning.
+      <p><b>AI Assistance.</b> Gemini was used to assist with deriving some of the higher-order derivative expressions, and Cursor was used to help build and iterate on the code.</p>
+    </div>
+    <div class="l--body">
+      <h2>References</h2>
+      <p>Zhang, R.Z., Miles, C.E., Xie, X., Lowengrub, J.S., 2026. BiLO: Bilevel Local Operator Learning for PDE Inverse Problems. <i>Journal of Computational Physics</i> 551, 114679.</p>
+      <p>Raissi, M., Perdikaris, P., Karniadakis, G.E., 2019. Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations. <i>Journal of Computational Physics</i> 378, 686–707.</p>
+    </div>
+  </article>
 
   <script src="bilo.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>

@@ -693,11 +693,21 @@ function pause() {
   d3.select("#play-pause-button i").style("display", (_, i) => (i === 0 ? "inline" : "none"));
 }
 
+function getToggleValue(toggleId: string): string {
+  const btn = document.querySelector(`#${toggleId} .bilo-toggle-btn.active`);
+  return (btn && (btn as HTMLElement).getAttribute("data-value")) || "";
+}
+
+function setToggleActive(toggleId: string, value: string) {
+  d3.selectAll(`#${toggleId} .bilo-toggle-btn`).classed("active", false);
+  d3.select(`#${toggleId} .bilo-toggle-btn[data-value="${value}"]`).classed("active", true);
+}
+
 function syncOptionsFromUI() {
-  odeType = (d3.select("#odeType").node() as HTMLSelectElement).value as OdeType;
+  odeType = getToggleValue("odeToggle") as OdeType || "exponential";
   u0 = Math.max(0.01, Math.min(2, +(d3.select("#u0").node() as HTMLInputElement).value || 1));
-  optimizer = (d3.select("#optimizer").node() as HTMLSelectElement).value as "sgd" | "adam";
-  modelType = (d3.select("#modelType").node() as HTMLSelectElement).value as "bilo" | "pinn";
+  optimizer = (getToggleValue("optimizerToggle") as "sgd" | "adam") || "sgd";
+  modelType = (getToggleValue("modelTypeToggle") as "bilo" | "pinn") || "bilo";
   lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.001;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
   // depthOption and nHidden are updated by +/- buttons; sync from display if present
@@ -718,7 +728,7 @@ function syncOptionsFromUI() {
   wGrad = !isNaN(wGradVal) && wGradVal >= 0 ? wGradVal : 0.1;
   const wDataVal = parseFloat((d3.select("#wData").node() as HTMLInputElement).value);
   wData = !isNaN(wDataVal) && wDataVal >= 0 ? wDataVal : 1.0;
-  mode = (d3.select("#mode").node() as HTMLSelectElement).value as "pretrain" | "finetune";
+  mode = (getToggleValue("modeToggle") as "pretrain" | "finetune") || "pretrain";
   aParam = Math.max(0.1, Math.min(10, +(d3.select("#aParam").node() as HTMLInputElement).value || 1));
   if (mode === "finetune") a_learned = aParam; // sync from control when in finetune
   aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
@@ -745,35 +755,44 @@ function init() {
   d3.select("#learningRate").on("change", function() { syncOptionsFromUI(); });
   d3.select("#lrA").on("change", function() { syncOptionsFromUI(); });
 
-  const pdeTitle = document.getElementById("pde-title");
-  if (pdeTitle) {
-    const setPdeTitle = () => {
-      pdeTitle.textContent = odeType === "exponential" ? "u' = a·u" : "u' = a·u·(1−u)";
-    };
-    setPdeTitle();
+  function onToggleClick(toggleId: string, handler: (value: string) => void) {
+    d3.selectAll(`#${toggleId} .bilo-toggle-btn`).on("click", function() {
+      const val = (this as HTMLElement).getAttribute("data-value") || "";
+      setToggleActive(toggleId, val);
+      handler(val);
+    });
   }
 
-  d3.select("#odeType").on("change", function() {
-    const val = (this as HTMLSelectElement).value as OdeType;
-    odeType = val;
+  onToggleClick("odeToggle", (val) => {
+    odeType = val as OdeType;
     const u0Input = document.getElementById("u0") as HTMLInputElement;
-    if (u0Input) u0Input.value = val === "logistic" ? "0.1" : "1";
-    syncOptionsFromUI();
-    const pt = document.getElementById("pde-title");
-    if (pt) pt.textContent = odeType === "exponential" ? "u' = a·u" : "u' = a·u·(1−u)";
-    pause();
-    reset();
-  });
-  d3.select("#u0").on("change", function() {
+    if (u0Input) u0Input.value = odeType === "logistic" ? "0.1" : "1";
     syncOptionsFromUI();
     pause();
     reset();
   });
-  d3.select("#optimizer").on("change", function() {
+
+  onToggleClick("modelTypeToggle", () => {
+    syncOptionsFromUI();
+    pause();
+    reset();
+  });
+
+  onToggleClick("optimizerToggle", () => {
     syncOptionsFromUI();
     adamState = { m_W: [], v_W: [], m_b: [], v_b: [] };
   });
-  d3.select("#modelType").on("change", function() {
+
+  onToggleClick("modeToggle", () => {
+    syncOptionsFromUI();
+    mode = getToggleValue("modeToggle") as "pretrain" | "finetune";
+    a_learned = aParam;
+    a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
+    if (mode === "finetune") trainingData = generateTrainingData();
+    else trainingData = null;
+    redrawPlot();
+  });
+  d3.select("#u0").on("change", function() {
     syncOptionsFromUI();
     pause();
     reset();
@@ -829,17 +848,6 @@ function init() {
     aParam = Math.max(0.1, Math.min(10, v));
     if (mode === "finetune") a_learned = aParam;
     a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
-    redrawPlot();
-  });
-  d3.select("#mode").on("change", function() {
-    mode = (this as HTMLSelectElement).value as "pretrain" | "finetune";
-    a_learned = aParam;
-    a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
-    if (mode === "finetune") {
-      trainingData = generateTrainingData();
-    } else {
-      trainingData = null;
-    }
     redrawPlot();
   });
 

@@ -6,13 +6,13 @@
 
 #bilo-page .bilo-network-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
   margin-bottom: 8px;
 }
 
 #bilo-page .bilo-network-header h4 {
-  margin: 0;
+  margin: 0 0 6px 0;
 }
 
 #bilo-page .bilo-network-controls {
@@ -23,10 +23,63 @@
 
 #bilo-page #top-controls .container {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#bilo-page #top-controls .control-row {
+  display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: flex-start;
   gap: 0 8px;
+}
+
+#bilo-page .bilo-toggle-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+#bilo-page .bilo-toggle-group .toggle-label {
+  font-size: 11px;
+  color: #666;
+}
+
+#bilo-page .bilo-toggle {
+  display: flex;
+  border: 1px solid #999;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#bilo-page .bilo-toggle-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: none;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  border-right: 1px solid #999;
+}
+
+#bilo-page .bilo-toggle-btn:last-child {
+  border-right: none;
+}
+
+#bilo-page .bilo-toggle-btn:hover {
+  background: #f0f0f0;
+}
+
+#bilo-page .bilo-toggle-btn.active {
+  background: #183D4E;
+  color: #fff;
+}
+
+#bilo-page #top-controls .control.bilo-toggle-group {
+  max-width: none;
+  min-width: 140px;
 }
 
 #bilo-page #top-controls .control {
@@ -135,8 +188,7 @@
 
 #bilo-page #network .canvas {
   position: absolute;
-  border: 2px solid rgba(0,0,0,0.15);
-  border-radius: 3px;
+  border: 1px solid #000;
   box-sizing: border-box;
   overflow: hidden;
 }

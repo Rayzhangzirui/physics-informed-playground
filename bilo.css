@@ -8,17 +8,17 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 #bilo-page .bilo-network-header h4 {
-  margin: 0 0 6px 0;
+  margin: 0 0 4px 0;
 }
 
 #bilo-page .bilo-network-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 #bilo-page #top-controls .container {
@@ -35,11 +35,16 @@
   gap: 0 8px;
 }
 
+/* Tighter spacing between Model / Optimizer / Mode toggle groups */
+#bilo-page #top-controls .control-row .control.bilo-toggle-group {
+  margin-right: -4px;
+}
+
 #bilo-page .bilo-toggle-group {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 3px;
 }
 
 #bilo-page .bilo-toggle-group .toggle-label {
@@ -55,7 +60,7 @@
 }
 
 #bilo-page .bilo-toggle-btn {
-  padding: 4px 10px;
+  padding: 4px 8px;
   font-size: 12px;
   border: none;
   background: #fff;
@@ -113,6 +118,15 @@
   font-size: 18px;
 }
 
+/* KaTeX math in labels: align baseline, prevent layout shift */
+#bilo-page .control label .katex {
+  font-size: 1em;
+}
+#bilo-page .control label .katex-display {
+  margin: 0;
+  display: inline;
+}
+
 #bilo-page .bilo-plus-minus .plus-minus-row {
   display: flex;
   align-items: center;
@@ -131,13 +145,17 @@
   display: flex;
   flex-direction: row;
   justify-content: stretch;
-  margin-top: 24px;
+  margin-top: 20px;
   margin-bottom: 30px;
   align-items: flex-start;
   gap: 0;
 }
 
 #bilo-page #main-part .column.features.bilo-network-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
   width: 55%;
   flex: 1 1 55%;
   min-width: 0;
@@ -169,12 +187,15 @@
   color: #777;
 }
 
-/* Network diagram: fill container, TF Playground style */
+/* Network diagram: fill container, TF Playground style; no extra space above */
 #bilo-page #network {
   position: relative;
   overflow: visible;
   min-height: 400px;
   width: 100%;
+  margin-top: 0;
+  padding-top: 0;
+  flex: 0 0 auto;
 }
 
 #bilo-page #network-diagram svg {

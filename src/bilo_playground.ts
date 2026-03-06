@@ -13,7 +13,7 @@ import {
 } from "./bilo";
 
 const RECT_SIZE = 32;
-const NETWORK_HEIGHT_MIN = 400;
+const NETWORK_HEIGHT_MIN = 300;
 /** Network fills the features column; width comes from container. */
 const T_MIN = 0;
 const T_MAX = 1;
@@ -259,7 +259,7 @@ function drawNetwork(container: d3.Selection<any>) {
   // Use container width (fills features column) like original TF Playground
   const parentEl = (container.node() as HTMLElement).parentElement;
   const networkWidth = parentEl ? Math.max(400, parentEl.clientWidth - 20) : 480;
-  const networkHeight = Math.max(NETWORK_HEIGHT_MIN, parentEl ? parentEl.clientHeight - 60 : 420);
+  const networkHeight = Math.max(NETWORK_HEIGHT_MIN, parentEl ? parentEl.clientHeight - 120 : 0);
 
   const d = model.depth;
   const numHiddenLayers = d - 1;
@@ -273,7 +273,7 @@ function drawNetwork(container: d3.Selection<any>) {
   layers.push({ ids: ["N"], labels: ["N"] });
   layers.push({ ids: ["u"], labels: ["u"] });
 
-  const padding = 24;
+  const padding = 10;
   const totalH = networkHeight - 2 * padding;
   const numLayers = layers.length;
   const layerWidth = (networkWidth - 2 * padding) / (numLayers + 1); // more layers => smaller spacing

@@ -13,10 +13,9 @@ This project uses **npm** scripts for building and watching the BILO Playground 
 |--------|-------------|
 | `npm run prep` | Copy static assets (HTML, CSS, lib.js) into `dist/` |
 | `npm run build-bilo` | Bundle BILO playground TS → `dist/bilo.js` |
-| `npm run build-js` | Bundle main playground TS and minify → `dist/bundle.js` |
 | `npm run build-css` | Concatenate CSS → `dist/bundle.css` |
 | `npm run build-html` | Copy/build HTML into `dist/` |
-| **`npm run build`** | Run prep + build-bilo + build-js + build-css + build-html (full build) |
+| **`npm run build`** | Run prep + build-bilo + build-css + build-html (full build) |
 
 ## Watch (development)
 

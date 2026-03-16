@@ -206,7 +206,9 @@ const colorScale = d3.scale.linear<string, number>()
   .range(["#f59322", "#e8eaeb", "#0877bd"])
   .clamp(true);
 
-/** Fill a canvas with a heatmap from 2D data (data[ix][iy]), color scale -1..1 */
+/** Fill a canvas with a heatmap from 2D data (data[ix][iy]), color scale -1..1.
+ *  Each heatmap is normalized independently: min -> -1, max -> 1.
+ */
 function fillHeatmapCanvas(
   canvas: HTMLCanvasElement,
   data: number[][],
@@ -217,10 +219,24 @@ function fillHeatmapCanvas(
   const ny = data.length;
   const nx = ny ? data[0].length : 0;
   if (nx === 0 || ny === 0) return;
+
+  // Per-heatmap normalization: map [min, max] -> [-1, 1].
+  let minV = data[0][0];
+  let maxV = data[0][0];
+  for (let ix = 0; ix < nx; ix++) {
+    for (let iy = 0; iy < ny; iy++) {
+      const v = data[ix][iy];
+      if (v < minV) minV = v;
+      if (v > maxV) maxV = v;
+    }
+  }
+  const range = maxV - minV || 1;
+
   const image = ctx.createImageData(nx, ny);
   for (let iy = 0, p = -1; iy < ny; iy++) {
     for (let ix = 0; ix < nx; ix++) {
-      const value = data[ix][iy];
+      const normalized = (data[ix][iy] - minV) / range;
+      const value = 2 * normalized - 1; // in [-1, 1]
       const c = d3.rgb(colorScale(value) as any);
       image.data[++p] = c.r;
       image.data[++p] = c.g;
@@ -315,14 +331,14 @@ function drawNetwork(container: d3.Selection<any>) {
   const nGrid = model.getNGrid(tGrid, aGrid);
   const uGrid = model.getUGrid(tGrid, aGrid);
 
-  // Input nodes t and a: mini heatmaps (built here, drawn after SVG so they sit on top)
+  // Input nodes t and a: mini heatmaps (functions on (t, a), drawn after SVG so they sit on top)
+  // For PINN, inputs effectively depend only on t: f(t) = t.
+  // For BiLO, inputs depend on (t, a): f(a, t) = t and g(a, t) = a.
   const tGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
-    Array.from({ length: HEATMAP_SAMPLES }, () => 2 * tGrid[ix] - 1)
+    Array.from({ length: HEATMAP_SAMPLES }, () => tGrid[ix])
   );
-  const aRange = aMax - aMin;
   const aGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
-    Array.from({ length: HEATMAP_SAMPLES }, (_, iy) =>
-      aRange === 0 ? 0 : ((aGrid[iy] - aMin) / aRange) * 2 - 1)
+    Array.from({ length: HEATMAP_SAMPLES }, (_, iy) => aGrid[iy])
   );
 
   // Heatmaps for N and u

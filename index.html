@@ -87,7 +87,7 @@
               </defs>
               <path d="M12 24 Q10 12 12 2" fill="none" stroke="#333" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#bilo-marker-mode)"/>
             </svg>
-            <div class="bilo-callout-label">Pretrain with fixed initial guess a, finetune to learn a.</div>
+            <div class="bilo-callout-label">Pretrain with fixed initial guess a, finetune to learn a with data.</div>
           </div>
         </div>
         <div class="control">
@@ -200,9 +200,9 @@
       <p>\[
 \begin{aligned}
 a^* &= \arg\min_a
-\underbrace{\frac{1}{N}\sum_i \left(u(t_i,a;W^*(a))-\hat u(t_i)\right)^2}_{\text{data loss}}, \\
-W^*(a) &= \arg\min_W \underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j,a;W)-a\,u(t_j,a;W)\right)^2}_{\text{residual loss}}+ \\
-& w_{\mathrm{rgrad}}  \underbrace{\frac{1}{N_r}\sum_j \left(\partial_a\big(u_t(t_j,a;W)-a\,u(t_j,a;W)\big)\right)^2}_{\text{residual-gradient loss}} .
+\underbrace{\frac{1}{N}\sum_i \left(u(t_i,a;W^*(a))-\hat u(t_i)\right)^2}_{\text{data loss } L_{\rm data}}, \\
+W^*(a) &= \arg\min_W \underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j,a;W)-a\,u(t_j,a;W)\right)^2}_{\text{residual loss } L_{\rm res}}+ \\
+& w_{\mathrm{rgrad}}  \underbrace{\frac{1}{N_r}\sum_j \left(\partial_a\big(u_t(t_j,a;W)-a\,u(t_j,a;W)\big)\right)^2}_{\text{residual-gradient loss } L_{\rm rgrad}} .
 \end{aligned}
 \]</p>
       <p>The lower-level problem trains the neural network to approximate a <b>local solution operator</b> near the current parameter value.</p>
@@ -217,10 +217,10 @@ W^*(a) &= \arg\min_W \underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j,a;W)-a\,u(t_j
       <p>\[
 \min_{W,a}
 \quad
-\underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j;W)-a\,u(t_j;W)\right)^2}_{\text{residual loss}}
+\underbrace{\frac{1}{N_r}\sum_j \left(u_t(t_j;W)-a\,u(t_j;W)\right)^2}_{\text{residual loss } L_{\rm res}}
 +
 w_{\mathrm{data}}
-\underbrace{\frac{1}{N}\sum_i \left(u(t_i;W)-\hat u(t_i)\right)^2}_{\text{data loss}} .
+\underbrace{\frac{1}{N}\sum_i \left(u(t_i;W)-\hat u(t_i)\right)^2}_{\text{data loss } L_{\rm data}} .
 \]</p>
       <p>In this formulation, the neural network is trained so that it both fits the observed data and the governing differential equation.</p>
     </div>

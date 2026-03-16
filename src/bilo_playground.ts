@@ -46,6 +46,7 @@ let modelType: "bilo" | "pinn" = "bilo";
 let mode: "pretrain" | "finetune" = "pretrain";
 let a_learned = 1;   // only used in finetune
 let adamState: AdamState = { m_W: [], v_W: [], m_b: [], v_b: [] };
+let showAnnotations = true;
 
 let t_colloc: number[];
 let a_colloc: number[];
@@ -473,7 +474,7 @@ function drawNetwork(container: d3.Selection<any>) {
     fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, grid, RECT_SIZE);
   });
 
-  // Callouts: text below target, arrow pointing up (marker so head follows path)
+  // Callouts: text near targets, arrow pointing up (marker so head follows path)
   const calloutWidth = 130;
   let calloutMarkerCounter = 0;
   function addCalloutBelow(nodeCx: number, nodeCy: number, labelText: string) {
@@ -507,20 +508,107 @@ function drawNetwork(container: d3.Selection<any>) {
     div.append("div").attr("class", "bilo-callout-label").text(labelText);
   }
 
-  const pad = 6;
-  // PINN: t is only input — below t node
-  if (modelType === "pinn") {
-    const tPos = node2coord["t"];
-    if (tPos) addCalloutBelow(tPos.cx, tPos.cy, "In PINN, t is the only input to the network.");
+  function addCalloutAbove(
+    nodeCx: number,
+    nodeCy: number,
+    labelText: string,
+    alignLeftOfArrow = false,
+    arrowOffsetX = 0
+  ) {
+    const topPx = nodeCy - RECT_SIZE / 2 - 50;
+    const baseLeft = nodeCx - calloutWidth / 2;
+    const leftPx = Math.max(4, alignLeftOfArrow ? nodeCx - calloutWidth : baseLeft);
+    const div = container.append("div").attr("class", "bilo-callout bilo-callout-above")
+      .style("position", "absolute").style("left", leftPx + "px").style("top", topPx + "px")
+      .style("width", calloutWidth + "px").style("pointer-events", "none");
+    // Text first (on top)…
+    div.append("div").attr("class", "bilo-callout-label").text(labelText);
+    // …then arrow SVG, so the arrow sits between text and target.
+    const svg = div.append("svg")
+      .attr("class", "bilo-callout-arrow-up")
+      .attr("viewBox", "0 0 24 20")
+      .attr("width", 24)
+      .attr("height", 20)
+      .attr("transform", `translate(${arrowOffsetX}, 0)`);
+    const markerId = `bilo-callout-marker-${calloutMarkerCounter++}`;
+    const defs = svg.append("defs");
+    defs.append("marker")
+      .attr("id", markerId)
+      .attr("markerWidth", 4)
+      .attr("markerHeight", 4)
+      .attr("refX", 2)
+      .attr("refY", 2)
+      .attr("orient", "auto")
+      .attr("markerUnits", "userSpaceOnUse")
+      .append("path")
+      .attr("d", "M0,0 L4,2 L0,4 z")
+      .attr("fill", "#333")
+      .attr("fill-opacity", "0.5");
+    svg.append("path")
+      .attr("d", "M12 2 Q14 10 12 18")
+      .attr("fill", "none")
+      .attr("stroke", "#333")
+      .attr("stroke-opacity", "0.5")
+      .attr("stroke-width", "1.5")
+      .attr("marker-end", `url(#${markerId})`);
   }
-  // BILO: a is also input — below a node
-  if (modelType === "bilo") {
-    const aPos = node2coord["a"];
-    if (aPos) addCalloutBelow(aPos.cx, aPos.cy, "In BiLO, a is also input, but only evaluated at current a.");
+
+  if (showAnnotations) {
+    // PINN: t is only input — below t node
+    if (modelType === "pinn") {
+      const tPos = node2coord["t"];
+      if (tPos) addCalloutBelow(tPos.cx, tPos.cy, "In PINN, t is the only input to the network.");
+    }
+    // BILO: a is also input — below a node
+    if (modelType === "bilo") {
+      const aPos = node2coord["a"];
+      if (aPos) addCalloutBelow(aPos.cx, aPos.cy, "In BiLO, a is also input, but only evaluated at current a.");
+    }
+    // Output u: u = tN + u₀ — below u node
+    const uPos = node2coord["u"];
+    if (uPos) addCalloutBelow(uPos.cx, uPos.cy, "u = tN + u₀ enforces the initial condition.");
+
+    // New: neuron-function callout below bottom neuron of first hidden layer.
+    if (numHiddenLayers > 0) {
+      const bottomId = `L0-${nHidden - 1}`;
+      const bottomPos = node2coord[bottomId];
+      if (bottomPos) {
+        const text = modelType === "pinn"
+          ? "Each neuron is a function of t; colors show its value (blue = maximum, orange = minimum"
+          : "Each neuron is a function of t and a; colors show its value (blue = maximum, orange = minimum";
+        addCalloutBelow(bottomPos.cx, bottomPos.cy, text);
+      }
+    }
+
+    // New: link callout above the connection from t to top neuron in first layer.
+    if (numHiddenLayers > 0) {
+      const tPos = node2coord["t"];
+      const topId = "L0-0";
+      const topPos = node2coord[topId];
+      if (tPos && topPos) {
+        const midCx = (tPos.cx + topPos.cx) / 2;
+        const midCy = (tPos.cy + topPos.cy) / 2;
+        // alignLeftOfArrow=true: text starts to the left of the arrow/target.
+        // arrowOffsetX>0: move only the arrow to the right, keep text position.
+        addCalloutAbove(
+          midCx+10,
+          midCy ,
+          "Edges are colored by connection weight (blue = positive, orange = negative)",
+          true,
+          110
+        );
+      }
+    }
+
+    // New: callout above N describing the MLP.
+    const nPos = node2coord["N"];
+    if (nPos) {
+      const text = modelType === "pinn"
+        ? "N is a multilayer perceptron of input t."
+        : "N is a multilayer perceptron of inputs t and a.";
+      addCalloutAbove(nPos.cx+50, nPos.cy, text);
+    }
   }
-  // Output u: u = tN + u₀ — below u node
-  const uPos = node2coord["u"];
-  if (uPos) addCalloutBelow(uPos.cx, uPos.cy, "u = tN + u₀");
 }
 
 function resetLossChart() {
@@ -899,6 +987,13 @@ function init() {
     a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
     redrawPlot();
     redrawLossChart();
+  });
+  d3.select("#annotations-toggle-btn").on("click", function() {
+    const btn = d3.select(this);
+    const isActive = btn.classed("active");
+    showAnnotations = !isActive;
+    btn.classed("active", showAnnotations);
+    updateUI();
   });
   d3.select("#play-pause-button").on("click", function() {
     if (isPlaying) pause(); else play();

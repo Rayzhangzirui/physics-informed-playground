@@ -332,6 +332,12 @@
   height: 100%;
 }
 
+/* Annotations toggle button: reuse weights style, dark when active */
+#bilo-page .bilo-annotations-btn.active {
+  background-color: #183D4E;
+  color: #fff;
+}
+
 /* Callouts: text below target, arrow pointing up with curve */
 #bilo-page #network .bilo-callout.bilo-callout-below {
   display: flex;
@@ -348,7 +354,7 @@
   font-style: italic;
   color: #555;
   line-height: 1.25;
-  text-align: center;
+  text-align: left;
 }
 
 /* Mode callout: floating annotation below Mode toggle, does not affect layout */

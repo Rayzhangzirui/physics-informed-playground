@@ -171,7 +171,8 @@
             </div>
           </div>
           <button type="button" class="bilo-weights-btn" id="save-weights-btn" title="save current parameters" data-tooltip="save current parameters">save</button>
-          <button type="button" class="bilo-weights-btn" id="load-weights-btn" title="load saved parameters" data-tooltip="load saved parameters">reload</button>
+          <button type="button" class="bilo-weights-btn" id="load-weights-btn" title="load saved parameters" data-tooltip="load saved parameters">load</button>
+          <button type="button" class="bilo-weights-btn bilo-annotations-btn active" id="annotations-toggle-btn" title="Toggle annotations" data-tooltip="Toggle annotations">annotations</button>
         </div>
       </div>
       <div id="network"></div>
@@ -223,11 +224,6 @@ w_{\mathrm{data}}
 \underbrace{\frac{1}{N}\sum_i \left(u(t_i;W)-\hat u(t_i)\right)^2}_{\text{data loss } L_{\rm data}} .
 \]</p>
       <p>In this formulation, the neural network is trained so that it both fits the observed data and the governing differential equation.</p>
-    </div>
-    <div class="l--body">
-      <h2>What Do All the Colors Mean?</h2>
-      <p>Orange and blue are used throughout the visualization in slightly different ways. The <b>lines</b> are colored by the weights of the connections between neurons. Blue shows a positive weight, and orange shows a negative weight.
-      Each <b>neuron</b> (including the input nodes, hidden layers, \(N\), and \(u\)) is visualized as a small heatmap. In PINN, every neuron can be viewed as a function of time \(t\); in BiLO, every neuron can be viewed as a function of both \(t\) and \(a\). The color in each mini heatmap is scaled independently per neuron: the minimum value of that neuron’s function is orange, and the maximum value is blue</p>
     </div>
     <div class="l--body">
       <h2>Interactive Playground</h2>

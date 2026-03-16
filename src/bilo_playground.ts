@@ -30,7 +30,7 @@ let timerId: number | null = null;
 let lr = 0.001;
 let lrA = 0.001;
 let depthOption = 3; // 2 = one hidden layer, 3 = two hidden, …
-let nHidden = 4;
+let nHidden = 6;
 let nPoints = 21;    // residual (collocation) points for L_res and L_grad
 let nDataPoints = 11; // data points for L_data (finetune)
 let wRes = 1;
@@ -202,6 +202,7 @@ function pushLossPoint(losses: { L_res: number; L_grad: number; L_data: number }
 
 const colorScale = d3.scale.linear<string, number>()
   .domain([-1, 0, 1])
+  // .range(["#eae69e", "#83a561", "#1a4718"])
   .range(["#f59322", "#e8eaeb", "#0877bd"])
   .clamp(true);
 
@@ -303,9 +304,12 @@ function drawNetwork(container: d3.Selection<any>) {
     { length: HEATMAP_SAMPLES },
     (_, i) => HEATMAP_T_DOMAIN[0] + (HEATMAP_T_DOMAIN[1] - HEATMAP_T_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
   );
+  const currentA = mode === "pretrain" ? aParam : a_learned;
+  const aMin = 0.5 * currentA;
+  const aMax = 1.5 * currentA;
   const aGrid = Array.from(
     { length: HEATMAP_SAMPLES },
-    (_, i) => HEATMAP_A_DOMAIN[0] + (HEATMAP_A_DOMAIN[1] - HEATMAP_A_DOMAIN[0]) * i / (HEATMAP_SAMPLES - 1)
+    (_, i) => aMin + (aMax - aMin) * i / (HEATMAP_SAMPLES - 1)
   );
   const sigmaGridAll = model.getSigmaGridAllLayers(tGrid, aGrid);
   const nGrid = model.getNGrid(tGrid, aGrid);
@@ -315,8 +319,10 @@ function drawNetwork(container: d3.Selection<any>) {
   const tGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
     Array.from({ length: HEATMAP_SAMPLES }, () => 2 * tGrid[ix] - 1)
   );
+  const aRange = aMax - aMin;
   const aGrid2D = Array.from({ length: HEATMAP_SAMPLES }, (_, ix) =>
-    Array.from({ length: HEATMAP_SAMPLES }, (_, iy) => (aGrid[iy] - 1.5) / 0.5)
+    Array.from({ length: HEATMAP_SAMPLES }, (_, iy) =>
+      aRange === 0 ? 0 : ((aGrid[iy] - aMin) / aRange) * 2 - 1)
   );
 
   // Heatmaps for N and u
@@ -450,6 +456,55 @@ function drawNetwork(container: d3.Selection<any>) {
       .style("width", "100%").style("height", "100%");
     fillHeatmapCanvas(canvas.node() as HTMLCanvasElement, grid, RECT_SIZE);
   });
+
+  // Callouts: text below target, arrow pointing up (marker so head follows path)
+  const calloutWidth = 130;
+  let calloutMarkerCounter = 0;
+  function addCalloutBelow(nodeCx: number, nodeCy: number, labelText: string) {
+    const topPx = nodeCy + RECT_SIZE / 2 + 6;
+    const leftPx = Math.max(4, nodeCx - calloutWidth / 2);
+    const div = container.append("div").attr("class", "bilo-callout bilo-callout-below")
+      .style("position", "absolute").style("left", leftPx + "px").style("top", topPx + "px")
+      .style("width", calloutWidth + "px").style("pointer-events", "none");
+    const svg = div.append("svg").attr("class", "bilo-callout-arrow-up").attr("viewBox", "0 0 24 20").attr("width", 24).attr("height", 20);
+    const markerId = `bilo-callout-marker-${calloutMarkerCounter++}`;
+    const defs = svg.append("defs");
+    defs.append("marker")
+      .attr("id", markerId)
+      .attr("markerWidth", 4)
+      .attr("markerHeight", 4)
+      .attr("refX", 2)
+      .attr("refY", 2)
+      .attr("orient", "auto")
+      .attr("markerUnits", "userSpaceOnUse")
+      .append("path")
+      .attr("d", "M0,0 L4,2 L0,4 z")
+      .attr("fill", "#333")
+      .attr("fill-opacity", "0.5");
+    svg.append("path")
+      .attr("d", "M12 18 Q10 10 12 2")
+      .attr("fill", "none")
+      .attr("stroke", "#333")
+      .attr("stroke-opacity", "0.5")
+      .attr("stroke-width", "1.5")
+      .attr("marker-end", `url(#${markerId})`);
+    div.append("div").attr("class", "bilo-callout-label").text(labelText);
+  }
+
+  const pad = 6;
+  // PINN: t is only input — below t node
+  if (modelType === "pinn") {
+    const tPos = node2coord["t"];
+    if (tPos) addCalloutBelow(tPos.cx, tPos.cy, "In PINN, t is the only input to the network.");
+  }
+  // BILO: a is also input — below a node
+  if (modelType === "bilo") {
+    const aPos = node2coord["a"];
+    if (aPos) addCalloutBelow(aPos.cx, aPos.cy, "In BiLO, a is also input, but only evaluated at current a.");
+  }
+  // Output u: u = tN + u₀ — below u node
+  const uPos = node2coord["u"];
+  if (uPos) addCalloutBelow(uPos.cx, uPos.cy, "u = tN + u₀");
 }
 
 function resetLossChart() {
@@ -537,7 +592,6 @@ function redrawLossChart() {
 }
 
 const HEATMAP_T_DOMAIN: [number, number] = [0, T_PLOT_MAX];
-const HEATMAP_A_DOMAIN: [number, number] = [0.5, 2.5];
 
 let plotSvg: d3.Selection<any> | null = null;
 
@@ -555,14 +609,15 @@ function redrawPlot() {
   const aDisplay = mode === "pretrain" ? aParam : a_learned;
   const tPlot = Array.from({ length: N_PLOT }, (_, i) => 0 + (T_PLOT_MAX - 0) * i / (N_PLOT - 1));
   const uPred = model.evalUArray(tPlot, aDisplay);  // PINNModel.evalU ignores second arg
-  const uExactGT = tPlot.map(t =>
+  const uExactGT = mode === "finetune" ? tPlot.map(t =>
     odeType === "exponential" ? u0 * Math.exp(aParamGT * t) : logisticSolution(t, aParamGT, u0)
-  );
+  ) : null;
   const uAnalyticalCurrent = tPlot.map(t =>
     odeType === "exponential" ? u0 * Math.exp(aDisplay * t) : logisticSolution(t, aDisplay, u0)
   );
 
-  let yMax = Math.max(d3.max(uPred)!, d3.max(uExactGT)!, d3.max(uAnalyticalCurrent)!);
+  let yMax = Math.max(d3.max(uPred)!, d3.max(uAnalyticalCurrent)!);
+  if (uExactGT) yMax = Math.max(yMax, d3.max(uExactGT)!);
   if (trainingData && trainingData.u_data.length > 0) {
     const dataMax = d3.max(trainingData.u_data)!;
     if (dataMax > yMax) yMax = dataMax;
@@ -591,13 +646,15 @@ function redrawPlot() {
     .attr("stroke-width", 1.5)
     .attr("d", line);
 
-  plotSvg.append("path")
-    .datum(uExactGT)
-    .attr("fill", "none")
-    .attr("stroke", "#333")
-    .attr("stroke-width", 1.5)
-    .attr("stroke-dasharray", "4,2")
-    .attr("d", line);
+  if (uExactGT) {
+    plotSvg.append("path")
+      .datum(uExactGT)
+      .attr("fill", "none")
+      .attr("stroke", "#333")
+      .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", "4,2")
+      .attr("d", line);
+  }
 
   if (trainingData && trainingData.t_data.length > 0) {
     for (let i = 0; i < trainingData.t_data.length; i++) {
@@ -628,10 +685,12 @@ function redrawPlot() {
     .attr("stroke", "#666").attr("stroke-width", 1.5);
   plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 22).attr("font-size", "11px")
     .text("Exact (a=" + aStr + ")");
-  plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 36).attr("x2", width + 28).attr("y2", legendY + 36)
-    .attr("stroke", "#333").attr("stroke-width", 1.5).attr("stroke-dasharray", "4,2");
-  plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 40).attr("font-size", "11px")
-    .text("GT (a=" + aParamGT + ")");
+  if (uExactGT) {
+    plotSvg.append("line").attr("x1", width + 8).attr("y1", legendY + 36).attr("x2", width + 28).attr("y2", legendY + 36)
+      .attr("stroke", "#333").attr("stroke-width", 1.5).attr("stroke-dasharray", "4,2");
+    plotSvg.append("text").attr("x", width + 32).attr("y", legendY + 40).attr("font-size", "11px")
+      .text("GT (a=" + aParamGT + ")");
+  }
   if (trainingData && trainingData.t_data.length > 0) {
     plotSvg.append("circle").attr("cx", width + 18).attr("cy", legendY + 54).attr("r", 3)
       .attr("fill", "#c00").attr("stroke", "#fff").attr("stroke-width", 1);
@@ -639,9 +698,71 @@ function redrawPlot() {
   }
 }
 
+function applyPretrainRestrictions() {
+  const isPretrain = mode === "pretrain";
+  const aParamLabel = document.querySelector("label[for='aParam']");
+  if (aParamLabel) aParamLabel.textContent = isPretrain ? "Fixed a" : "Learned a";
+  const calloutModeText = document.getElementById("callout-mode-text");
+  if (calloutModeText) {
+    calloutModeText.textContent = isPretrain
+      ? "Pretrain: a is fixed, residual only."
+      : "Finetune: a is learned; fit data.";
+  }
+
+  const aParamGTInput = d3.select("#aParamGT").node() as HTMLInputElement;
+  const nDataPointsInput = d3.select("#nDataPoints").node() as HTMLInputElement;
+  const wGradControl = d3.select("#wGradControl");
+
+  const aParamGTParent = aParamGTInput?.parentElement;
+  const nDataPointsParent = nDataPointsInput?.parentElement;
+
+  if (isPretrain) {
+    if (aParamGTInput) {
+      aParamGTInput.disabled = true;
+      aParamGTInput.value = "";
+      aParamGTInput.placeholder = "—";
+    }
+    aParamGTParent?.classList.add("bilo-pretrain-disabled");
+    if (nDataPointsInput) {
+      nDataPointsInput.disabled = true;
+      nDataPointsInput.value = "";
+      nDataPointsInput.placeholder = "—";
+    }
+    nDataPointsParent?.classList.add("bilo-pretrain-disabled");
+    wGradControl.classed("bilo-pretrain-disabled", true);
+    const wGradInput = wGradControl.select("input").node() as HTMLInputElement;
+    if (wGradInput) {
+      wGradInput.disabled = true;
+      wGradInput.value = "";
+      wGradInput.placeholder = "—";
+    }
+  } else {
+    if (aParamGTInput) {
+      aParamGTInput.disabled = false;
+      aParamGTInput.value = String(aParamGT);
+      aParamGTInput.placeholder = "";
+    }
+    aParamGTParent?.classList.remove("bilo-pretrain-disabled");
+    if (nDataPointsInput) {
+      nDataPointsInput.disabled = false;
+      nDataPointsInput.value = String(nDataPoints);
+      nDataPointsInput.placeholder = "";
+    }
+    nDataPointsParent?.classList.remove("bilo-pretrain-disabled");
+    wGradControl.classed("bilo-pretrain-disabled", false);
+    const wGradInput = wGradControl.select("input").node() as HTMLInputElement;
+    if (wGradInput) {
+      wGradInput.disabled = false;
+      wGradInput.value = String(wGrad);
+      wGradInput.placeholder = "";
+    }
+  }
+}
+
 function updateUI() {
   ensureTrainingData();
   d3.select("#iter-number").text(iter);
+  applyPretrainRestrictions();
   // Sync parameter a control with network: in finetune show a_learned so user sees updates
   const aInput = d3.select("#aParam").node() as HTMLInputElement;
   if (aInput) {
@@ -703,7 +824,7 @@ function setToggleActive(toggleId: string, value: string) {
 function syncOptionsFromUI() {
   odeType = getToggleValue("odeToggle") as OdeType || "exponential";
   u0 = Math.max(0.01, Math.min(2, +(d3.select("#u0").node() as HTMLInputElement).value || 1));
-  optimizer = (getToggleValue("optimizerToggle") as "sgd" | "adam") || "sgd";
+  optimizer = (getToggleValue("optimizerToggle") as "sgd" | "adam") || "adam";
   modelType = (getToggleValue("modelTypeToggle") as "bilo" | "pinn") || "bilo";
   lr = +(d3.select("#learningRate").node() as HTMLInputElement).value || 0.001;
   lrA = +(d3.select("#lrA").node() as HTMLInputElement).value || 0.001;
@@ -715,20 +836,24 @@ function syncOptionsFromUI() {
   }
   const nHiddenEl = document.getElementById("nHidden-value");
   if (nHiddenEl) {
-    nHidden = Math.max(2, Math.min(8, parseInt(nHiddenEl.textContent || "4", 10)));
+    nHidden = Math.max(2, Math.min(8, parseInt(nHiddenEl.textContent || "6", 10)));
   }
   nPoints = Math.max(3, Math.min(101, +(d3.select("#nPoints").node() as HTMLInputElement).value || 21));
-  nDataPoints = Math.max(2, Math.min(101, +(d3.select("#nDataPoints").node() as HTMLInputElement).value || 11));
+  mode = (getToggleValue("modeToggle") as "pretrain" | "finetune") || "pretrain";
+  if (mode === "finetune") {
+    nDataPoints = Math.max(2, Math.min(101, +(d3.select("#nDataPoints").node() as HTMLInputElement).value || 11));
+  }
   const wResVal = parseFloat((d3.select("#wRes").node() as HTMLInputElement).value);
   wRes = !isNaN(wResVal) && wResVal >= 0 ? wResVal : 1;
-  const wGradVal = parseFloat((d3.select("#wGrad").node() as HTMLInputElement).value);
-  wGrad = !isNaN(wGradVal) && wGradVal >= 0 ? wGradVal : 0.1;
+  if (mode === "finetune" && modelType === "bilo") {
+    const wGradVal = parseFloat((d3.select("#wGrad").node() as HTMLInputElement).value);
+    wGrad = !isNaN(wGradVal) && wGradVal >= 0 ? wGradVal : 0.1;
+  }
   const wDataVal = parseFloat((d3.select("#wData").node() as HTMLInputElement).value);
   wData = !isNaN(wDataVal) && wDataVal >= 0 ? wDataVal : 1.0;
-  mode = (getToggleValue("modeToggle") as "pretrain" | "finetune") || "pretrain";
   aParam = Math.max(0.1, Math.min(10, +(d3.select("#aParam").node() as HTMLInputElement).value || 1));
   if (mode === "finetune") a_learned = aParam; // sync from control when in finetune
-  aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
+  if (mode === "finetune") aParamGT = +(d3.select("#aParamGT").node() as HTMLInputElement).value || 2;
   noiseLevel = Math.max(0, Math.min(0.5, +(d3.select("#noise").node() as HTMLInputElement).value || 0));
   const wGradControl = d3.select("#wGradControl");
   if (modelType === "pinn") wGradControl.style("opacity", "0.5").style("pointer-events", "none");
@@ -810,6 +935,7 @@ function init() {
     a_colloc = t_colloc.map(() => (mode === "pretrain" ? aParam : a_learned));
     if (mode === "finetune") trainingData = generateTrainingData();
     else trainingData = null;
+    applyPretrainRestrictions();
     redrawPlot();
   });
   d3.select("#u0").on("change", function() {

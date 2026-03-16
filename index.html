@@ -63,6 +63,7 @@
             <button type="button" class="bilo-toggle-btn" data-value="pinn">PINN</button>
           </div>
         </div>
+        <!-- Optimizer: always ADAM
         <div class="control bilo-toggle-group">
           <span class="toggle-label">Optimizer</span>
           <div class="bilo-toggle" id="optimizerToggle">
@@ -70,11 +71,12 @@
             <button type="button" class="bilo-toggle-btn active" data-value="adam">ADAM</button>
           </div>
         </div>
+        -->
         <div class="control bilo-toggle-group">
           <span class="toggle-label">Mode</span>
           <div class="bilo-toggle" id="modeToggle">
-            <button type="button" class="bilo-toggle-btn active" data-value="pretrain" title="a is fixed" data-tooltip="a is fixed">Pretrain</button>
-            <button type="button" class="bilo-toggle-btn" data-value="finetune" title="a is learned" data-tooltip="a is learned">Finetune</button>
+            <button type="button" class="bilo-toggle-btn active" data-value="pretrain" title="a is fixed, solve the forward problem">Pretrain</button>
+            <button type="button" class="bilo-toggle-btn" data-value="finetune" title="a is learned, solve the inverse problem">Finetune</button>
           </div>
         </div>
         <div class="control">
@@ -82,9 +84,20 @@
         <input type="number" id="u0" min="0.01" max="2" step="0.01" value="1" class="control-input" title="u(0); default 1 (exponential) or 0.1 (logistic)">
       </div>
         <div class="control-row">
-          <div class="control">
+          <div class="control" id="aParam-control">
           <label for="aParam">Learned \( a \)</label>
           <input type="number" id="aParam" min="0.1" max="10" step="0.1" value="1" class="control-input">
+          <div class="bilo-callout-mode" id="callout-mode">
+            <svg class="bilo-callout-arrow-up" viewBox="0 0 24 26" width="20" height="22">
+              <defs>
+                <marker id="bilo-marker-up" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto" markerUnits="userSpaceOnUse">
+                  <path d="M0,0 L4,2 L0,4 z" fill="#333" fill-opacity="0.5"/>
+                </marker>
+              </defs>
+              <path d="M12 24 Q10 12 12 2" fill="none" stroke="#333" stroke-opacity="0.5" stroke-width="1.5" marker-end="url(#bilo-marker-up)"/>
+            </svg>
+            <div class="bilo-callout-label" id="callout-mode-text">Pretrain: a fixed, residual only.</div>
+          </div>
         </div>
           <div class="control">
           <label for="aParamGT">\( a_{GT} \)</label>
@@ -102,23 +115,23 @@
       </div>
         <div class="control">
         <label for="learningRate">lr<sub>W</sub></label>
-        <input type="number" id="learningRate" min="0.001" max="0.5" step="0.001" value="0.02" class="control-input">
+        <input type="number" id="learningRate" min="0.001" max="0.5" step="0.001" value="0.01" class="control-input" title="Learning rate for network weights W">
       </div>
         <div class="control">
         <label for="lrA">lr<sub>a</sub></label>
-        <input type="number" id="lrA" min="0.0001" max="0.05" step="0.0001" value="0.001" class="control-input">
+        <input type="number" id="lrA" min="0.0001" max="0.05" step="0.001" value="0.01" class="control-input" title="Learning rate for parameter a (finetune only)">
       </div>
         <div class="control">
-        <label for="wRes">w<sub>res</sub></label>
-        <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input">
+        <label for="wRes">\(w\)<sub>res</sub></label>
+        <input type="number" id="wRes" min="0" max="2" step="0.1" value="1" class="control-input" title="Weight for residual loss L_res">
       </div>
       <div class="control" id="wGradControl">
-        <label for="wGrad">w<sub>rgrad</sub></label>
-        <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input" title="BILO only">
+        <label for="wGrad">\(w\)<sub>rgrad</sub></label>
+        <input type="number" id="wGrad" min="0" max="2" step="0.1" value="0.1" class="control-input" title="Weight for residual-gradient loss (BILO only)">
       </div>
         <div class="control">
-        <label for="wData">w<sub>data</sub></label>
-        <input type="number" id="wData" min="0" max="2" step="0.1" value="1" class="control-input">
+        <label for="wData">\(w\)<sub>data</sub></label>
+        <input type="number" id="wData" min="0" max="2" step="0.1" value="1" class="control-input" title="Weight for data loss L_data (finetune only)">
       </div>
         <div class="control">
         <label for="noise">Noise</label>
@@ -151,7 +164,7 @@
               <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="nHidden-minus" title="Fewer neurons">
                 <i class="material-icons">remove</i>
               </button>
-              <span class="plus-minus-value" id="nHidden-value">4</span>
+              <span class="plus-minus-value" id="nHidden-value">6</span>
               <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="nHidden-plus" title="More neurons">
                 <i class="material-icons">add</i>
               </button>
@@ -182,7 +195,7 @@
     </div>
     <div class="l--body">
       <h2>What Is BiLO?</h2>
-      <p><b>Bilevel Local Operator Learning</b> uses a neural network \(u(t,a;W)\) to represent the solution of the differential equation, where \(W\) are the network weights. The unknown parameter \(a\) is also included as an input to the neural network.</p>
+      <p><b>Bilevel Local Operator Learning</b> uses a neural network \(u(t,a;W)\) to represent the solution of the differential equation, where \(W\) are the network weights. The unknown parameter \(a\) is also included as an input to the neural network. To enforce the initial condition, we can represent the solution by \(u(t,a;W) = N(t,a;W) + u_0 t\), where \(u_0\) is the initial condition and \(N\) is a multilayer perceptron (MLP).</p>
       <p>BiLO solves the following bilevel optimization problem</p>
       <p>\[
 \begin{aligned}

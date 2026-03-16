@@ -5,7 +5,7 @@
 }
 
 #bilo-page header {
-  background-color: #183D4E;
+  background-color: #184e44;
 }
 
 /* GitHub link: top right (dark icon on tan header) */
@@ -120,6 +120,17 @@
   min-width: 120px;
 }
 
+/* Pretrain mode: gray out a_GT, data points, w_rgrad */
+#bilo-page #top-controls .control.bilo-pretrain-disabled,
+#bilo-page #top-controls .control.bilo-pretrain-disabled label {
+  opacity: 0.5;
+  pointer-events: none;
+}
+#bilo-page #top-controls .control.bilo-pretrain-disabled input {
+  background: #eee;
+  color: #999;
+}
+
 #bilo-page #top-controls .control {
   flex: 0 0 auto;
   max-width: 100px;
@@ -216,6 +227,29 @@
   position: relative;
 }
 
+/* Tooltips for control inputs (lr_W, lr_a, weights) */
+#bilo-page #top-controls .control-input[data-tooltip] {
+  position: relative;
+}
+#bilo-page #top-controls .control-input[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #333;
+  background: #fff;
+  border: 1px solid #999;
+  border-radius: 2px;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+}
+
 /* Main part: strict 2-column layout (override original 3-column .features / .output widths) */
 #bilo-page #main-part {
   display: flex;
@@ -295,6 +329,55 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* Callouts: text below target, arrow pointing up with curve */
+#bilo-page #network .bilo-callout.bilo-callout-below {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 140px;
+}
+#bilo-page #network .bilo-callout .bilo-callout-arrow-up {
+  flex-shrink: 0;
+}
+#bilo-page #network .bilo-callout-label {
+  font-size: 10px;
+  font-style: italic;
+  color: #555;
+  line-height: 1.25;
+  text-align: center;
+}
+
+/* Mode callout: floating annotation, does not affect control layout */
+#bilo-page #aParam-control {
+  position: relative;
+}
+#bilo-page .bilo-callout-mode {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 2px;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 400px;
+  min-width: 100px;
+}
+#bilo-page .bilo-callout-mode .bilo-callout-arrow-up {
+  flex-shrink: 0;
+}
+#bilo-page .bilo-callout-mode .bilo-callout-label {
+  font-size: 9px;
+  font-style: italic;
+  color: #555;
+  line-height: 1.2;
+  text-align: center;
 }
 
 /* u(t) plot: larger */

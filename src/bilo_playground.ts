@@ -533,7 +533,7 @@ function redrawLossChart() {
   if (modelType === "bilo") {
     series.push({ key: "L_res", color: "#f59322", getVal: d => d.L_res });
     series.push({ key: "L_grad", color: "#0877bd", getVal: d => d.L_grad });
-    series.push({ key: "L_op", color: "#333", getVal: d => (d.L_op ?? wRes * d.L_res + wGrad * d.L_grad) });
+    // series.push({ key: "L_op", color: "#333", getVal: d => (d.L_op ?? wRes * d.L_res + wGrad * d.L_grad) });
     if (!isPretrain) series.push({ key: "L_data", color: "#0a0", getVal: d => d.L_data });
   } else {
     series.push({ key: "L_res", color: "#f59322", getVal: d => d.L_res });
@@ -580,7 +580,7 @@ function redrawLossChart() {
 
   const legendLineH = 16;
   const legend = svg.append("g").attr("transform", "translate(" + (width + 2) + ",0)");
-  const subLabels: Record<string, string> = { L_res: "res", L_grad: "grad", L_data: "data", L_op: "op" };
+  const subLabels: Record<string, string> = { L_res: "res", L_grad: "rgrad", L_data: "data", L_op: "op" };
   series.forEach((s, i) => {
     legend.append("line").attr("x1", 0).attr("y1", i * legendLineH).attr("x2", 10).attr("y2", i * legendLineH)
       .attr("stroke", s.color).attr("stroke-width", s.key === "L_op" ? 1.5 : 1);
@@ -702,13 +702,6 @@ function applyPretrainRestrictions() {
   const isPretrain = mode === "pretrain";
   const aParamLabel = document.querySelector("label[for='aParam']");
   if (aParamLabel) aParamLabel.textContent = isPretrain ? "Fixed a" : "Learned a";
-  const calloutModeText = document.getElementById("callout-mode-text");
-  if (calloutModeText) {
-    calloutModeText.textContent = isPretrain
-      ? "Pretrain: a is fixed, residual only."
-      : "Finetune: a is learned; fit data.";
-  }
-
   const aParamGTInput = d3.select("#aParamGT").node() as HTMLInputElement;
   const nDataPointsInput = d3.select("#nDataPoints").node() as HTMLInputElement;
   const wGradControl = d3.select("#wGradControl");

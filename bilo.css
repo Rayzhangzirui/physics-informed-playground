@@ -66,6 +66,7 @@
 }
 
 #bilo-page .bilo-toggle-group {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -350,10 +351,7 @@
   text-align: center;
 }
 
-/* Mode callout: floating annotation, does not affect control layout */
-#bilo-page #aParam-control {
-  position: relative;
-}
+/* Mode callout: floating annotation below Mode toggle, does not affect layout */
 #bilo-page .bilo-callout-mode {
   position: absolute;
   top: 100%;
